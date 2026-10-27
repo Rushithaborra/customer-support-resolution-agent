@@ -174,7 +174,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | --- | --- | --- | --- |
 | 1. Foundation | Schema, migrations, seed data, health check | Tables created, constraint tests pass | Done |
 | 2. Auth and tickets | Token-derived identity, ownership checks, ticket endpoints | Asha gets 404 on `ord_2001`; tickets create and list | Done |
-| 3. Mock services | Payment, shipping, ticket APIs with timeouts, errors and idempotency-key contract | Same key + payload returns same operation; changed payload rejected | Not started |
+| 3. Mock services | Payment, shipping, ticket APIs with timeouts, errors and idempotency-key contract | Same key + payload returns same operation; changed payload rejected | Done |
 | 4. Deterministic resolution | Eligibility rules in code, manual resolution endpoints | A refund ticket resolves end to end with no LLM | Not started |
 | 5. LLM tools | LLM client, typed read tools, Pydantic structured outputs, repair-or-stop | Tools return structured success and failure; invalid output is caught | Not started |
 | 6. Agent workflow | LangGraph state, classify, investigate, route; single-agent baseline | Each seed scenario routes to the right branch | Not started |
