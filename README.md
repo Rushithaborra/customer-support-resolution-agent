@@ -5,7 +5,11 @@ using business data, versioned policies, controlled tools and human approval.
 
 **Status:** Parts 1–4 done: foundation, token auth with ownership checks, mock external
 services with an idempotency contract, and a full manual (no-LLM) resolution path: eligibility
-rules in code, hash-bound approvals, and exactly-once refund execution. See `docs/project-overview.md`.
+rules in code, hash-bound approvals, and exactly-once refund execution. Part 5 adds the LLM
+(Anthropic) behind read-only typed tools and validated structured outputs. See `docs/project-overview.md`.
+
+Optional, to try the agent for real: put `ANTHROPIC_API_KEY` in `.env`, start the mocks, then
+`uv run python -m scripts.llm_smoke "I returned my headphones but no refund yet"`.
 
 ## Scope (v1)
 One store, one currency (INR). Three complaint types: order status, refund request,

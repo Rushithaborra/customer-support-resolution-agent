@@ -176,7 +176,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 2. Auth and tickets | Token-derived identity, ownership checks, ticket endpoints | Asha gets 404 on `ord_2001`; tickets create and list | Done |
 | 3. Mock services | Payment, shipping, ticket APIs with timeouts, errors and idempotency-key contract | Same key + payload returns same operation; changed payload rejected | Done |
 | 4. Deterministic resolution | Eligibility rules in code, manual resolution endpoints | A refund ticket resolves end to end with no LLM | Done |
-| 5. LLM tools | LLM client, typed read tools, Pydantic structured outputs, repair-or-stop | Tools return structured success and failure; invalid output is caught | Not started |
+| 5. LLM tools | LLM client, typed read tools, Pydantic structured outputs, repair-or-stop | Tools return structured success and failure; invalid output is caught | Done |
 | 6. Agent workflow | LangGraph state, classify, investigate, route; single-agent baseline | Each seed scenario routes to the right branch | Not started |
 | 7. Proposals | Resolution proposals, payload hashing, code-side validation | Proposals carry evidence refs; wrong amounts are rejected by code | Not started |
 | 8. Policy RAG | Synthetic versioned policies, chunking, embeddings, pgvector migration, citations | Correct policy section retrieved; no policy leads to escalation | Not started |
@@ -193,7 +193,7 @@ One decision blocks Part 5: which LLM provider to use. It sets the tool-calling 
 
 ### Open decisions
 
-- [ ] LLM provider (Anthropic, OpenAI or other) — needed before Part 5
+- [x] LLM provider: Anthropic (`anthropic` SDK), default `claude-opus-5-5` at effort `medium`, set via `LLM_MODEL` — decided for Part 5
 - [ ] Embedding model and vector dimension — needed before Part 8. Local dev note: Homebrew's
   `pgvector` package doesn't support `postgresql@16`; build pgvector from source against PG16 or use Docker.
 - [ ] Frontend stack (plain HTML + JS, React or Streamlit) — needed before Part 12
