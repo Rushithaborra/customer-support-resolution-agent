@@ -125,7 +125,7 @@ class Return(TimestampMixin, Base):
 # ---------------------------------------------------------------- support work
 
 TICKET_CATEGORIES = ["order_status", "refund_request", "damaged_item", "unclassified"]
-TICKET_STATUSES = ["open", "awaiting_customer", "awaiting_approval", "escalated", "resolved"]
+TICKET_STATUSES = ["open", "awaiting_customer", "awaiting_approval", "awaiting_provider", "escalated", "resolved"]
 
 
 class Ticket(TimestampMixin, Base):
@@ -233,7 +233,11 @@ class Approval(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-REFUND_STATUSES = ["reserved", "submitted", "succeeded", "failed", "pending_reconciliation"]
+# reserved: balance held, definitely never sent · submitted: may have been sent
+# processing: provider accepted, not settled · pending_reconciliation: outcome unknown
+REFUND_STATUSES = ["reserved", "submitted", "processing", "succeeded", "failed", "pending_reconciliation"]
+# Statuses that hold part of the order's refundable balance. Only 'failed' releases it.
+REFUND_HOLDING_STATUSES = ["reserved", "submitted", "processing", "succeeded", "pending_reconciliation"]
 
 
 class RefundOperation(TimestampMixin, Base):
