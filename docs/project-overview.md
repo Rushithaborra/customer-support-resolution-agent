@@ -180,7 +180,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 6. Agent workflow | LangGraph state, classify, investigate, route; single-agent baseline | Each seed scenario routes to the right branch | Done |
 | 7. Proposals | Resolution proposals, payload hashing, code-side validation | Proposals carry evidence refs; wrong amounts are rejected by code | Done |
 | 8. Policy RAG | Synthetic versioned policies, chunking, embeddings, pgvector migration, citations | Correct policy section retrieved; no policy leads to escalation | Done |
-| 9. Human approval | Reviewer auth, approval API, `interrupt()` and resume, expiry, invalidation | Approve, reject and expire each follow their path after a restart | Not started |
+| 9. Human approval | Reviewer auth, approval API, `interrupt()` and resume, expiry, invalidation | Approve, reject and expire each follow their path after a restart | Done |
 | 10. Async runs | Job persistence, worker, `202 Accepted`, run status and event timeline | A run survives worker restart and resumes | Not started |
 | 11. Refund safety | Reservation with `SELECT ... FOR UPDATE`, idempotent execution, reconciliation | Timeout, restart and concurrent tests produce zero duplicate refunds | Not started |
 | 12. Frontend | Customer panel, workflow timeline, evidence panel, approval queue, outcome panel | Demos A, B and C run in the UI | Not started |

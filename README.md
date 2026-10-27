@@ -11,7 +11,10 @@ LangGraph workflow per ticket where the model classifies and investigates but co
 Part 7 lets the agent draft refund proposals with evidence refs; code rejects any draft whose amount,
 order or evidence doesn't match the facts and the run's own tool trace. Part 8 adds versioned policy
 documents with local embeddings (bge-small-en-v1.5) in pgvector; every decision cites the policy
-version it applied, and if no policy applies the ticket escalates. See `docs/project-overview.md`.
+version it applied, and if no policy applies the ticket escalates. Part 9 makes approval durable:
+the workflow pauses with LangGraph `interrupt()` (checkpoints in Postgres), a separate reviewer role
+approves (never the proposer), stale proposals expire, and the run resumes into exactly-once
+execution, even after a restart. See `docs/project-overview.md`.
 
 Optional, to try the agent for real: put `ANTHROPIC_API_KEY` in `.env`, start the mocks, then
 `uv run python -m scripts.llm_smoke "I returned my headphones but no refund yet"`.
@@ -33,6 +36,8 @@ uv run pytest -q                     # full suite (starts its own mock services)
 uv run uvicorn app.main:app --reload # http://127.0.0.1:8000/docs
 uv run uvicorn mocks.main:app --port 8001  # mock payment/shipping/helpdesk, http://127.0.0.1:8001/docs
 uv run python -m scripts.policy_search "my return hasn't arrived yet"  # see ranked policy citations
+uv run python -m scripts.mint_token --reviewer "reviewer|ravi"  # token that can approve/reject
+uv run python -m scripts.expire_proposals  # expire stale proposals (Part 10 will schedule it)
 ```
 
 Without Docker (Homebrew Postgres 16): pgvector must be built from source for PG16, and since it
