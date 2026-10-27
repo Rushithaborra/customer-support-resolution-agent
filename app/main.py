@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import customers, orders, staff, tickets
+from app.api import agent, customers, orders, staff, tickets
 from app.db.session import get_db
 from app.services.errors import Conflict, NotEligible, NotFound, ProviderUnavailable
 
@@ -12,6 +12,7 @@ app.include_router(customers.router)
 app.include_router(orders.router)
 app.include_router(tickets.router)
 app.include_router(staff.router)
+app.include_router(agent.router)
 
 
 @app.exception_handler(NotFound)

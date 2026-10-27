@@ -39,6 +39,9 @@ class ToolContext:
     customer_id: str          # from the authenticated ticket, never from model output
     shipping: ShippingClient
     run_id: str | None = None
+    # When set (inside the agent graph), audit rows are buffered here and written by
+    # the graph's single writer node instead of by the tool itself.
+    audit_buffer: list[dict] | None = None
 
 
 @dataclass(frozen=True)
@@ -186,8 +189,11 @@ def execute_tool(ctx: ToolContext, name: str, raw_input: object) -> ToolResult:
             ctx.db.rollback()
             result = ToolFailure("internal_error", "Tool failed")
 
-    ctx.db.add(AuditEvent(run_id=ctx.run_id, actor="agent", event_type="tool.called", redacted_payload={
-        "tool": name, "ok": isinstance(result, ToolSuccess),
-        "code": getattr(result, "code", None), "order_id": order_id}))
-    ctx.db.commit()
+    audit = {"tool": name, "ok": isinstance(result, ToolSuccess),
+             "code": getattr(result, "code", None), "order_id": order_id}
+    if ctx.audit_buffer is not None:
+        ctx.audit_buffer.append(audit)
+    else:
+        ctx.db.add(AuditEvent(run_id=ctx.run_id, actor="agent", event_type="tool.called", redacted_payload=audit))
+    ctx.db.commit()  # writes the audit row, or (buffered) just ends the read transaction before the next LLM call
     return result

@@ -112,6 +112,17 @@ class CloseIn(BaseModel):
     summary: str = Field(min_length=1, max_length=2000)
 
 
+class AgentRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    ticket_id: str
+    status: str
+    route: str | None
+    route_reason: str | None
+    outcome: dict | None
+
+
 class RefundOperationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

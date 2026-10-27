@@ -37,8 +37,13 @@ def _tool_result_block(tool_use_id: str, result) -> dict:
 
 
 def run_tool_loop(llm: LLM, ctx: ToolContext, *, system: str, user_message: str,
-                  max_steps: int = 8) -> LoopResult:
-    messages: list[dict] = [{"role": "user", "content": wrap_customer_message(user_message)}]
+                  max_steps: int = 8, preface: str | None = None) -> LoopResult:
+    """preface: trusted, system-verified context (e.g. which order code resolved),
+    kept outside the untrusted customer-message block."""
+    content = wrap_customer_message(user_message)
+    if preface:
+        content = f"{preface}\n\n{content}"
+    messages: list[dict] = [{"role": "user", "content": content}]
     specs = tool_specs()
     out = LoopResult(stop="step_limit", text="")
 
