@@ -18,6 +18,7 @@ from app.integrations.results import Ok
 from app.integrations.shipping import ShippingClient
 from app.services.errors import Conflict, NotEligible, NotFound
 from app.services.facts import load_order_facts
+from app.services.proposals import build_refund_payload, create_refund_proposal
 
 # Ticket states where money may be in flight: closing by hand would hide it.
 _IN_FLIGHT_TICKET_STATES = {"awaiting_approval", "awaiting_provider"}
@@ -95,42 +96,23 @@ def propose_refund(db: Session, staff: Staff, ticket_id: str) -> ActionProposal:
     if not decision.eligible:
         raise NotEligible(decision.reason_code)
 
-    r = facts.latest_return
-    payload = {
-        "action": "refund",
-        "ticket_id": ticket.id,
-        "order_id": facts.order_id,
-        "amount_minor": decision.refundable_minor,
-        "currency": facts.currency,
-        "reason_code": decision.reason_code,
-        "policy_version": POLICY_VERSION,
-        "evidence": {"return_id": r.return_id, "return_status": r.status,
-                     "inspection_status": r.inspection_status,
-                     "received_at": r.received_at.isoformat()},
-    }
-
-    # Only one live proposal per ticket: older unexecuted ones can no longer be approved or run.
-    stale = db.scalars(
-        select(ActionProposal).join(WorkflowRun, ActionProposal.run_id == WorkflowRun.id)
-        .where(WorkflowRun.ticket_id == ticket.id,
-               ActionProposal.status.in_(["pending_approval", "approved"]))
-    ).all()
-    for p in stale:
-        p.status = "superseded"
-
+    payload = build_refund_payload(
+        ticket.id, facts, decision,
+        evidence_refs=[f"code:evaluate_refund:{facts.order_id}", f"db:return:{facts.latest_return.return_id}"],
+        proposed_by=staff.actor, rationale="Proposed by staff after manual assessment")
     run = WorkflowRun(ticket_id=ticket.id, thread_id=f"manual-{uuid.uuid4().hex}", status="paused")
     db.add(run)
     db.flush()
-    proposal = ActionProposal(run_id=run.id, action_type="refund", payload=payload,
-                              payload_hash=payload_hash(payload))
-    db.add(proposal)
-    db.flush()
-    ticket.status = "awaiting_approval"
-    _audit(db, staff.actor, "proposal.created", run_id=run.id, proposal_id=proposal.id,
-           amount_minor=decision.refundable_minor, payload_hash=proposal.payload_hash,
-           superseded=[p.id for p in stale])
+    proposal = create_refund_proposal(db, run=run, ticket=ticket, payload=payload, actor=staff.actor)
     db.commit()
     return proposal
+
+
+def list_proposals(db: Session, status: str | None) -> list[ActionProposal]:
+    q = select(ActionProposal).order_by(ActionProposal.created_at.desc())
+    if status:
+        q = q.where(ActionProposal.status == status)
+    return list(db.scalars(q).all())
 
 
 def approve(db: Session, staff: Staff, proposal_id: str, presented_hash: str, now: datetime) -> Approval:

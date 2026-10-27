@@ -1,6 +1,7 @@
 """Staff routes for manual, deterministic resolution. Every route requires a staff token."""
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -49,6 +50,14 @@ def close(ticket_id: str, body: CloseIn, staff: Staff = Depends(get_current_staf
           db: Session = Depends(get_db)):
     ticket = resolution.close_ticket(db, staff, ticket_id, body.outcome, body.summary)
     return with_outcome(db, ticket, StaffTicketOut)
+
+
+@router.get("/proposals", response_model=list[ProposalOut])
+def list_proposals(status: Literal["pending_approval", "approved", "rejected", "expired", "superseded",
+                                   "executed"] | None = None,
+                   _: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
+    """Reviewer queue: ?status=pending_approval shows what's waiting for a human."""
+    return resolution.list_proposals(db, status)
 
 
 @router.get("/proposals/{proposal_id}", response_model=ProposalOut)
