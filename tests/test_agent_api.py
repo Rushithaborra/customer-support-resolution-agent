@@ -3,7 +3,7 @@
 from app.llm.deps import get_llm
 from app.main import app
 from tests.conftest import ASHA, as_customer, as_staff
-from tests.test_agent_workflow import full_script, open_ticket
+from tests.agent_scripts import full_script, open_ticket
 
 
 def test_customer_cannot_run_the_agent(client):
@@ -18,7 +18,8 @@ def test_staff_runs_agent_and_reads_result(staff_client):
     r = staff_client.post(f"/staff/tickets/{tid}/agent-runs", headers=as_staff())
     assert r.status_code == 201
     run = r.json()
-    assert (run["route"], run["route_reason"], run["status"]) == ("propose_refund", "eligible", "completed")
+    assert (run["route"], run["route_reason"], run["status"]) == ("propose_refund", "eligible", "paused")
+    assert run["outcome"]["proposal_id"].startswith("prp_")
     assert run["outcome"]["trace"][0]["tool"] == "check_refund_eligibility"
 
     again = staff_client.get(f"/staff/agent-runs/{run['id']}", headers=as_staff())

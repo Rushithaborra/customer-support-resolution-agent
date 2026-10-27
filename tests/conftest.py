@@ -144,3 +144,14 @@ def inject(admin: httpx.Client, kind: str, operation: str | None = None,
            delay_s: float = FAULT_DELAY_S, count: int = 1) -> None:
     admin.post("/_admin/faults", json={"kind": kind, "operation": operation,
                                        "delay_s": delay_s, "count": count}).raise_for_status()
+
+
+@pytest.fixture
+def agent(db, service_client):
+    """Run the agent graph on a ticket with a scripted LLM against the real DB and mocks."""
+    from app.agent.runner import run_agent
+    from app.integrations.shipping import ShippingClient
+
+    def run(ticket_id: str, llm):
+        return run_agent(db, llm, ShippingClient(service_client), ticket_id, actor="staff:staff|priya")
+    return run

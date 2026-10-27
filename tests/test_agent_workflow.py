@@ -6,45 +6,12 @@ import pytest
 from sqlalchemy import select
 
 from app.agent.graph import ReadOnlyViolation, read_only
-from app.agent.runner import run_agent
 from app.db.models import AuditEvent, Ticket
-from app.integrations.shipping import ShippingClient
 from app.llm.fake import ScriptedLLM, text_turn, tool_turn
 from app.llm.types import LLMConfigError, LLMUnavailable
 from app.services.errors import Conflict
-from tests.conftest import ASHA, VIKRAM, as_customer
-
-
-# ---------------------------------------------------------------- script helpers
-
-
-def triage(category: str, order_id: str | None, needs_human: bool = False):
-    return text_turn(json.dumps({"category": category, "order_id": order_id, "customer_intent": "x",
-                                 "needs_human": needs_human, "rationale": "r"}))
-
-
-def summary(step: str, ref: str):
-    return text_turn(json.dumps({"findings": [{"statement": "s", "evidence_ref": ref}],
-                                 "recommended_next_step": step, "customer_reply_draft": "draft"}))
-
-
-def full_script(category: str, order_id: str, tool: str, step: str) -> ScriptedLLM:
-    return ScriptedLLM([triage(category, order_id), tool_turn((tool, {"order_id": order_id})),
-                        text_turn("notes"), summary(step, f"{tool}:{order_id}")])
-
-
-def open_ticket(client, message: str, order_id: str | None = None, who: str = ASHA) -> str:
-    body = {"message": message} | ({"order_id": order_id} if order_id else {})
-    r = client.post("/tickets", headers=as_customer(who), json=body)
-    assert r.status_code == 201, r.json()
-    return r.json()["id"]
-
-
-@pytest.fixture
-def agent(db, service_client):
-    def run(ticket_id: str, llm: ScriptedLLM):
-        return run_agent(db, llm, ShippingClient(service_client), ticket_id, actor="staff:staff|priya")
-    return run
+from tests.agent_scripts import full_script, open_ticket, triage
+from tests.conftest import ASHA, VIKRAM
 
 
 # ---------------------------------------------------------------- the six seed scenarios
@@ -63,12 +30,14 @@ def test_seed_scenarios_route_correctly(client, agent, db, who, order_id, catego
     tid = open_ticket(client, "help with my order", order_id, who=who)
     run = agent(tid, full_script(category, order_id, tool, step))
 
+    expected_run = {"escalate": "escalated", "propose_refund": "paused"}.get(route, "completed")
+    expected_ticket = {"escalate": "escalated", "propose_refund": "awaiting_approval"}.get(route, "open")
     assert (run.route, run.route_reason) == (route, reason)
-    assert run.status == ("escalated" if route == "escalate" else "completed")
+    assert run.status == expected_run
     assert run.outcome["agreed"] is True and run.outcome["triage"]["category"] == category
     ticket = db.get(Ticket, tid)
     assert ticket.category == category  # filled in from triage
-    assert ticket.status == ("escalated" if route == "escalate" else "open")
+    assert ticket.status == expected_ticket
     routed = db.scalars(select(AuditEvent).where(AuditEvent.run_id == run.id,
                                                  AuditEvent.event_type == "agent.routed")).all()
     assert len(routed) == 1
@@ -171,12 +140,19 @@ def test_read_only_guard_blocks_writes(db):
 
 
 def test_running_twice_creates_two_runs_and_consistent_ticket(client, agent, db):
-    tid = open_ticket(client, "refund?", "ord_1001")
-    r1 = agent(tid, full_script("refund_request", "ord_1001", "check_refund_eligibility", "propose_refund"))
-    r2 = agent(tid, full_script("refund_request", "ord_1001", "check_refund_eligibility", "propose_refund"))
-    assert r1.id != r2.id and r1.route == r2.route == "propose_refund"
+    tid = open_ticket(client, "where is it?", "ord_1003")
+    script = lambda: full_script("order_status", "ord_1003", "get_shipment", "report_order_status")  # noqa: E731
+    r1, r2 = agent(tid, script()), agent(tid, script())
+    assert r1.id != r2.id and r1.route == r2.route == "report_order_status"
     t = db.get(Ticket, tid)
-    assert (t.category, t.status) == ("refund_request", "open")
+    assert (t.category, t.status) == ("order_status", "open")
+
+
+def test_cannot_rerun_while_agent_proposal_pending(client, agent):
+    tid = open_ticket(client, "refund?", "ord_1001")
+    agent(tid, full_script("refund_request", "ord_1001", "check_refund_eligibility", "propose_refund"))
+    with pytest.raises(Conflict):
+        agent(tid, ScriptedLLM([]))
 
 
 def test_blocked_while_refund_in_flight(client, agent, db):
