@@ -8,6 +8,8 @@ services with an idempotency contract, and a full manual (no-LLM) resolution pat
 rules in code, hash-bound approvals, and exactly-once refund execution. Part 5 adds the LLM
 (Anthropic) behind read-only typed tools and validated structured outputs. Part 6 wires them into a
 LangGraph workflow per ticket where the model classifies and investigates but code picks the route.
+Part 7 lets the agent draft refund proposals with evidence refs; code rejects any draft whose amount,
+order or evidence doesn't match the facts and the run's own tool trace.
 See `docs/project-overview.md`.
 
 Optional, to try the agent for real: put `ANTHROPIC_API_KEY` in `.env`, start the mocks, then
