@@ -11,6 +11,7 @@ from app.integrations.deps import get_shipping_client
 from app.integrations.shipping import ShippingClient
 from app.llm.deps import get_llm
 from app.llm.types import LLM
+from app.policy.embedder import Embedder, get_embedder
 from app.schemas import AgentRunOut
 from app.services.errors import NotFound
 
@@ -19,8 +20,9 @@ router = APIRouter(prefix="/staff", tags=["agent"])
 
 @router.post("/tickets/{ticket_id}/agent-runs", response_model=AgentRunOut, status_code=201)
 def start(ticket_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
-          llm: LLM = Depends(get_llm), shipping: ShippingClient = Depends(get_shipping_client)):
-    return run_agent(db, llm, shipping, ticket_id, actor=staff.actor)
+          llm: LLM = Depends(get_llm), shipping: ShippingClient = Depends(get_shipping_client),
+          embedder: Embedder = Depends(get_embedder)):
+    return run_agent(db, llm, shipping, ticket_id, actor=staff.actor, embedder=embedder)
 
 
 @router.get("/agent-runs/{run_id}", response_model=AgentRunOut)

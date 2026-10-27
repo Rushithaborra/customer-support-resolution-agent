@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.integrations.deps import get_payment_client, get_shipping_client
 from app.integrations.payment import PaymentClient
 from app.integrations.shipping import ShippingClient
+from app.policy.embedder import Embedder, get_embedder
 from app.schemas import (ApprovalOut, ApproveIn, ClassifyIn, CloseIn, ProposalOut,
                          RefundOperationOut, StaffTicketOut)
 from app.services import refunds, resolution
@@ -41,8 +42,9 @@ def assess(ticket_id: str, _: Staff = Depends(get_current_staff), db: Session = 
 
 
 @router.post("/tickets/{ticket_id}/proposals", response_model=ProposalOut, status_code=201)
-def propose(ticket_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
-    return resolution.propose_refund(db, staff, ticket_id)
+def propose(ticket_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
+            embedder: Embedder = Depends(get_embedder)):
+    return resolution.propose_refund(db, staff, ticket_id, embedder)
 
 
 @router.post("/tickets/{ticket_id}/close", response_model=StaffTicketOut)

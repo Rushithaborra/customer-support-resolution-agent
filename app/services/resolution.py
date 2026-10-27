@@ -4,7 +4,7 @@ Every decision here is code. Staff choose *which* step to take; they cannot
 choose the amount, the eligibility outcome, or who they are."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +16,9 @@ from app.domain.hashing import payload_hash
 from app.domain.policy import APPROVAL_TTL, POLICY_VERSION
 from app.integrations.results import Ok
 from app.integrations.shipping import ShippingClient
+from app.policy.embedder import Embedder
+from app.policy.queries import query_for
+from app.policy.retrieve import retrieve
 from app.services.errors import Conflict, NotEligible, NotFound
 from app.services.facts import load_order_facts
 from app.services.proposals import build_refund_payload, create_refund_proposal
@@ -86,8 +89,8 @@ def assess(db: Session, ticket_id: str, shipping: ShippingClient, now: datetime)
     return result
 
 
-def propose_refund(db: Session, staff: Staff, ticket_id: str) -> ActionProposal:
-    """Code decides eligibility and computes the amount; staff can only ask."""
+def propose_refund(db: Session, staff: Staff, ticket_id: str, embedder: Embedder) -> ActionProposal:
+    """Code decides eligibility, computes the amount and finds the policy to cite; staff can only ask."""
     ticket = get_ticket(db, ticket_id)
     if ticket.order_id is None:
         raise NotEligible("no_order")
@@ -95,11 +98,15 @@ def propose_refund(db: Session, staff: Staff, ticket_id: str) -> ActionProposal:
     decision = evaluate_refund(facts)
     if not decision.eligible:
         raise NotEligible(decision.reason_code)
+    citations = retrieve(db, query_for(decision.reason_code), embedder=embedder, as_of=datetime.now(timezone.utc))
+    if not citations:
+        raise NotEligible("no_policy_found")
 
     payload = build_refund_payload(
         ticket.id, facts, decision,
         evidence_refs=[f"code:evaluate_refund:{facts.order_id}", f"db:return:{facts.latest_return.return_id}"],
-        proposed_by=staff.actor, rationale="Proposed by staff after manual assessment")
+        proposed_by=staff.actor, rationale="Proposed by staff after manual assessment",
+        policy_citations=[c.ref for c in citations])
     run = WorkflowRun(ticket_id=ticket.id, thread_id=f"manual-{uuid.uuid4().hex}", status="paused")
     db.add(run)
     db.flush()

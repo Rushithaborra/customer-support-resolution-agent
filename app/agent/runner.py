@@ -8,6 +8,7 @@ from app.agent.graph import AgentDeps, build_graph
 from app.db.models import AuditEvent, WorkflowRun
 from app.integrations.shipping import ShippingClient
 from app.llm.types import LLM
+from app.policy.embedder import Embedder, get_embedder
 from app.services.errors import Conflict
 from app.services.resolution import get_ticket
 
@@ -15,7 +16,8 @@ from app.services.resolution import get_ticket
 _BLOCKED_TICKET_STATES = {"awaiting_approval", "awaiting_provider"}
 
 
-def run_agent(db: Session, llm: LLM, shipping: ShippingClient, ticket_id: str, actor: str) -> WorkflowRun:
+def run_agent(db: Session, llm: LLM, shipping: ShippingClient, ticket_id: str, actor: str,
+              embedder: Embedder | None = None) -> WorkflowRun:
     ticket = get_ticket(db, ticket_id)
     if ticket.status in _BLOCKED_TICKET_STATES:
         raise Conflict("refund_in_flight", f"Ticket is {ticket.status}")
@@ -26,7 +28,7 @@ def run_agent(db: Session, llm: LLM, shipping: ShippingClient, ticket_id: str, a
     db.add(AuditEvent(run_id=run.id, actor=actor, event_type="agent.started", redacted_payload={"ticket_id": ticket.id}))
     db.commit()
 
-    graph = build_graph(AgentDeps(db=db, llm=llm, shipping=shipping))
+    graph = build_graph(AgentDeps(db=db, llm=llm, shipping=shipping, embedder=embedder or get_embedder()))
     try:
         graph.invoke({"run_id": run.id, "ticket_id": ticket.id},
                      config={"configurable": {"thread_id": run.thread_id}})

@@ -1,8 +1,9 @@
 """Refund proposals: one builder for both the staff path (Part 4) and the agent path (Part 7).
 
 The payload is always built from code facts. The amount is the rules' refundable
-amount, never a number a person or a model typed. Evidence refs, who proposed it
-and why are inside the payload, so they're inside the hash the approval binds to.
+amount, never a number a person or a model typed. Evidence refs, cited policy
+sections, who proposed it and why are inside the payload, so they're inside the
+hash the approval binds to.
 """
 
 from sqlalchemy import select
@@ -15,7 +16,10 @@ from app.domain.policy import POLICY_VERSION
 
 
 def build_refund_payload(ticket_id: str, facts: OrderFacts, decision: RefundDecision, *,
-                         evidence_refs: list[str], proposed_by: str, rationale: str) -> dict:
+                         evidence_refs: list[str], proposed_by: str, rationale: str,
+                         policy_citations: list[str]) -> dict:
+    if not policy_citations:
+        raise ValueError("a refund proposal must cite the policy it applies")
     if not decision.eligible:
         raise ValueError("refund payloads are only built for eligible decisions")
     r = facts.latest_return
@@ -30,6 +34,7 @@ def build_refund_payload(ticket_id: str, facts: OrderFacts, decision: RefundDeci
         "evidence": {"return_id": r.return_id, "return_status": r.status,
                      "inspection_status": r.inspection_status, "received_at": r.received_at.isoformat()},
         "evidence_refs": list(evidence_refs),
+        "policy_citations": list(policy_citations),  # e.g. refund_policy@v2#section_1
         "proposed_by": proposed_by,
         "rationale": rationale,
     }
