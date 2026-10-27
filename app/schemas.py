@@ -85,6 +85,7 @@ class ProposalOut(BaseModel):
     payload: dict
     payload_hash: str
     status: str
+    created_by: str | None
 
 
 class ApproveIn(BaseModel):
@@ -133,3 +134,16 @@ class RefundOperationOut(BaseModel):
     idempotency_key: str
     provider_reference: str | None
     status: str
+
+
+class DecisionOut(BaseModel):
+    """What a reviewer's decision led to: the proposal, the approval (if approved),
+    the agent run's status after resuming, and the refund if one was executed."""
+    proposal: ProposalOut
+    approval: ApprovalOut | None
+    run_status: str | None
+    refund: RefundOperationOut | None
+
+
+class ExpiryOut(BaseModel):
+    expired: list[str]

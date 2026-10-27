@@ -1,9 +1,11 @@
-"""Start a workflow run for a ticket and execute the graph (synchronously; Part 10 makes it async)."""
+"""Start a workflow run for a ticket and execute the graph until it finishes or pauses for
+approval (synchronously; Part 10 makes it async). Checkpoints are durable (Postgres)."""
 
 import uuid
 
 from sqlalchemy.orm import Session
 
+from app.agent.checkpoint import get_checkpointer
 from app.agent.graph import AgentDeps, build_graph
 from app.db.models import AuditEvent, WorkflowRun
 from app.integrations.shipping import ShippingClient
@@ -17,7 +19,7 @@ _BLOCKED_TICKET_STATES = {"awaiting_approval", "awaiting_provider"}
 
 
 def run_agent(db: Session, llm: LLM, shipping: ShippingClient, ticket_id: str, actor: str,
-              embedder: Embedder | None = None) -> WorkflowRun:
+              embedder: Embedder | None = None, checkpointer=None) -> WorkflowRun:
     ticket = get_ticket(db, ticket_id)
     if ticket.status in _BLOCKED_TICKET_STATES:
         raise Conflict("refund_in_flight", f"Ticket is {ticket.status}")
@@ -28,7 +30,8 @@ def run_agent(db: Session, llm: LLM, shipping: ShippingClient, ticket_id: str, a
     db.add(AuditEvent(run_id=run.id, actor=actor, event_type="agent.started", redacted_payload={"ticket_id": ticket.id}))
     db.commit()
 
-    graph = build_graph(AgentDeps(db=db, llm=llm, shipping=shipping, embedder=embedder or get_embedder()))
+    graph = build_graph(AgentDeps(db=db, llm=llm, shipping=shipping, embedder=embedder or get_embedder()),
+                        checkpointer=checkpointer or get_checkpointer())
     try:
         graph.invoke({"run_id": run.id, "ticket_id": ticket.id},
                      config={"configurable": {"thread_id": run.thread_id}})

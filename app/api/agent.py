@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.agent.checkpoint import get_checkpointer
 from app.agent.runner import run_agent
 from app.auth import Staff, get_current_staff
 from app.db.models import WorkflowRun
@@ -21,8 +22,8 @@ router = APIRouter(prefix="/staff", tags=["agent"])
 @router.post("/tickets/{ticket_id}/agent-runs", response_model=AgentRunOut, status_code=201)
 def start(ticket_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
           llm: LLM = Depends(get_llm), shipping: ShippingClient = Depends(get_shipping_client),
-          embedder: Embedder = Depends(get_embedder)):
-    return run_agent(db, llm, shipping, ticket_id, actor=staff.actor, embedder=embedder)
+          embedder: Embedder = Depends(get_embedder), checkpointer=Depends(get_checkpointer)):
+    return run_agent(db, llm, shipping, ticket_id, actor=staff.actor, embedder=embedder, checkpointer=checkpointer)
 
 
 @router.get("/agent-runs/{run_id}", response_model=AgentRunOut)

@@ -1,4 +1,5 @@
-"""Staff routes for manual, deterministic resolution. Every route requires a staff token."""
+"""Staff and reviewer routes. Operating a ticket needs a staff (or reviewer) token;
+deciding a proposal needs a reviewer token, and never the proposal's creator."""
 
 from datetime import datetime, timezone
 from typing import Literal
@@ -6,15 +7,17 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.auth import Staff, get_current_staff
+from app.agent.checkpoint import get_checkpointer
+from app.agent.resume import resume_for_proposal, resume_superseded
+from app.auth import Staff, get_current_reviewer, get_current_staff
 from app.db.session import get_db
 from app.integrations.deps import get_payment_client, get_shipping_client
 from app.integrations.payment import PaymentClient
 from app.integrations.shipping import ShippingClient
 from app.policy.embedder import Embedder, get_embedder
-from app.schemas import (ApprovalOut, ApproveIn, ClassifyIn, CloseIn, ProposalOut,
+from app.schemas import (ApproveIn, ClassifyIn, CloseIn, DecisionOut, ExpiryOut, ProposalOut,
                          RefundOperationOut, StaffTicketOut)
-from app.services import refunds, resolution
+from app.services import approvals, refunds, resolution
 from app.services.tickets import with_outcome
 
 router = APIRouter(prefix="/staff", tags=["staff"])
@@ -43,8 +46,12 @@ def assess(ticket_id: str, _: Staff = Depends(get_current_staff), db: Session = 
 
 @router.post("/tickets/{ticket_id}/proposals", response_model=ProposalOut, status_code=201)
 def propose(ticket_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
-            embedder: Embedder = Depends(get_embedder)):
-    return resolution.propose_refund(db, staff, ticket_id, embedder)
+            embedder: Embedder = Depends(get_embedder), checkpointer=Depends(get_checkpointer),
+            payment: PaymentClient = Depends(get_payment_client)):
+    proposal = resolution.propose_refund(db, staff, ticket_id, embedder)
+    # Any agent proposal this one superseded: let its paused workflow finish as "invalidated".
+    resume_superseded(db, ticket_id, checkpointer=checkpointer, payment=payment)
+    return proposal
 
 
 @router.post("/tickets/{ticket_id}/close", response_model=StaffTicketOut)
@@ -67,15 +74,39 @@ def get_proposal(proposal_id: str, _: Staff = Depends(get_current_staff), db: Se
     return resolution.get_proposal(db, proposal_id)
 
 
-@router.post("/proposals/{proposal_id}/approve", response_model=ApprovalOut)
-def approve(proposal_id: str, body: ApproveIn, staff: Staff = Depends(get_current_staff),
-            db: Session = Depends(get_db)):
-    return resolution.approve(db, staff, proposal_id, body.payload_hash, _now())
+def _decision(db: Session, proposal_id: str, approval=None, run=None) -> dict:
+    return {"proposal": resolution.get_proposal(db, proposal_id),
+            "approval": approval,
+            "run_status": run.status if run else None,
+            "refund": refunds.operation_for(db, proposal_id)}
 
 
-@router.post("/proposals/{proposal_id}/reject", response_model=ProposalOut)
-def reject(proposal_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
-    return resolution.reject(db, staff, proposal_id, _now())
+@router.post("/proposals/{proposal_id}/approve", response_model=DecisionOut)
+def approve(proposal_id: str, body: ApproveIn, reviewer: Staff = Depends(get_current_reviewer),
+            db: Session = Depends(get_db), checkpointer=Depends(get_checkpointer),
+            payment: PaymentClient = Depends(get_payment_client)):
+    """Store the approval, then resume the paused agent workflow (if any), which executes the refund."""
+    approval = approvals.approve(db, reviewer, proposal_id, body.payload_hash, _now())
+    run = resume_for_proposal(db, proposal_id, "approved", checkpointer=checkpointer, payment=payment)
+    return _decision(db, proposal_id, approval, run)
+
+
+@router.post("/proposals/{proposal_id}/reject", response_model=DecisionOut)
+def reject(proposal_id: str, reviewer: Staff = Depends(get_current_reviewer), db: Session = Depends(get_db),
+           checkpointer=Depends(get_checkpointer), payment: PaymentClient = Depends(get_payment_client)):
+    approvals.reject(db, reviewer, proposal_id, _now())
+    run = resume_for_proposal(db, proposal_id, "rejected", checkpointer=checkpointer, payment=payment)
+    return _decision(db, proposal_id, None, run)
+
+
+@router.post("/maintenance/expire-proposals", response_model=ExpiryOut)
+def expire_proposals(_: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
+                     checkpointer=Depends(get_checkpointer), payment: PaymentClient = Depends(get_payment_client)):
+    """Expire stale proposals and finish their paused workflows. Part 10's worker runs this on a schedule."""
+    expired = approvals.expire_stale(db, _now())
+    for pid in expired:
+        resume_for_proposal(db, pid, "expired", checkpointer=checkpointer, payment=payment)
+    return {"expired": expired}
 
 
 @router.post("/proposals/{proposal_id}/execute", response_model=RefundOperationOut)

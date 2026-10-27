@@ -35,7 +35,7 @@ def _audit(db: Session, actor: str, event_type: str, op: RefundOperation, run_id
                       redacted_payload={"refund_operation_id": op.id, "status": op.status, **extra}))
 
 
-def _operation_for(db: Session, proposal_id: str) -> RefundOperation | None:
+def operation_for(db: Session, proposal_id: str) -> RefundOperation | None:
     return db.scalar(select(RefundOperation).where(RefundOperation.proposal_id == proposal_id))
 
 
@@ -50,7 +50,7 @@ def execute(db: Session, actor: str, proposal_id: str, payment: PaymentClient,
     if proposal is None:
         raise NotFound("Proposal")
 
-    op = _operation_for(db, proposal.id)
+    op = operation_for(db, proposal.id)
     if op is not None:
         if op.status in FINAL:
             return op
@@ -144,7 +144,7 @@ def _reserve(db: Session, actor: str, proposal: ActionProposal) -> RefundOperati
     except IntegrityError:
         # Same key already exists: another execute of this proposal won the race.
         db.rollback()
-        return _operation_for(db, proposal.id)
+        return operation_for(db, proposal.id)
     _audit(db, actor, "refund.reserved", op, proposal.run_id, amount_minor=amount)
     db.commit()  # releases the row lock
     return op
@@ -168,6 +168,7 @@ def _record(db: Session, actor: str, op: RefundOperation, proposal: ActionPropos
         # Nothing was applied, but a request may have been in flight (e.g. 409 in progress),
         # so the status stays where it is and reconciliation will ask again.
         _audit(db, actor, "refund.provider_unavailable", op, proposal.run_id, reason=result.reason)
+        _sync_workflow(db, op, proposal)  # ticket shows awaiting_provider, not "awaiting approval"
         db.commit()
         raise ProviderUnavailable(result.reason)
 

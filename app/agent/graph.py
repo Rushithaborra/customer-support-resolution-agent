@@ -4,12 +4,16 @@
                     └──────────── early exit (route already set) ─────────────┘
                                      route → cite_policy (no policy → escalate)
                                      propose_refund → draft_proposal → validate_proposal → record
+  record (proposal created) → await_approval ⏸ interrupt ── resume ──► execute_refund → finalize
+                                                                  └──► finalize (rejected/expired/invalidated)
 
-Two rules shape it:
+Three rules shape it:
 - Code picks the route. The model's recommended next step is recorded and
   compared, but routing reads code facts (ownership, eligibility, damage window).
-- Only `record` writes. Every other node is wrapped read-only, so a node that
-  re-runs on resume (Part 9) can't duplicate a side effect.
+- Only writer nodes write (record, execute_refund, finalize). Every other node is
+  wrapped read-only, so a node that re-runs on resume can't duplicate a side effect.
+- After the pause, the decision is re-read from the database. The resume value
+  only wakes the graph; it can't approve anything.
 """
 
 from collections.abc import Callable
@@ -19,6 +23,7 @@ from typing import TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
@@ -29,18 +34,23 @@ from app.agent.tools import ToolContext
 from app.db.models import ActionProposal, AuditEvent, Ticket, WorkflowRun
 from app.domain.eligibility import assess_damage, evaluate_refund
 from app.domain.proposal_rules import validate_refund_draft
+from app.integrations.payment import PaymentClient
 from app.integrations.shipping import ShippingClient
 from app.llm.structured import Parsed, structured_call
 from app.llm.types import LLM, Usage
 from app.policy.embedder import Embedder
 from app.policy.queries import query_for
 from app.policy.retrieve import retrieve
-from app.services.errors import NotFound
+from app.services import refunds
+from app.services.errors import Conflict, NotEligible, NotFound, ProviderUnavailable
 from app.services.facts import load_order_facts
 from app.services.orders import get_owned_order
 from app.services.proposals import build_refund_payload, create_refund_proposal
 
-WRITER_NODES = {"record"}
+WRITER_NODES = {"record", "execute_refund", "finalize"}
+
+# Proposal status → what the paused workflow does next. Anything else keeps waiting.
+DECISIONS = {"approved": "approved", "rejected": "rejected", "expired": "expired", "superseded": "invalidated"}
 
 
 class AgentState(TypedDict, total=False):
@@ -65,6 +75,9 @@ class AgentState(TypedDict, total=False):
     proposal_draft: dict | None
     proposal_violations: list[dict] | None
     proposal_payload: dict | None
+    proposal_id: str | None
+    decision: str | None
+    execution: dict | None
     usage: dict
     models: list[str]
 
@@ -72,9 +85,10 @@ class AgentState(TypedDict, total=False):
 @dataclass
 class AgentDeps:
     db: Session
-    llm: LLM
-    shipping: ShippingClient
-    embedder: Embedder
+    llm: LLM | None = None              # not needed when resuming after approval
+    shipping: ShippingClient | None = None
+    embedder: Embedder | None = None
+    payment: PaymentClient | None = None  # only the execute_refund step uses it
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
 
@@ -224,7 +238,8 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         payload = state.get("proposal_payload")
         if route_ == "propose_refund" and payload:
             existing = db.scalar(select(ActionProposal).where(ActionProposal.run_id == run.id))
-            proposal = existing or create_refund_proposal(db, run=run, ticket=ticket, payload=payload, actor="agent")
+            proposal = existing or create_refund_proposal(db, run=run, ticket=ticket, payload=payload, actor="agent",
+                                                         created_by="agent")
             proposal_id, run.status, run.completed_at = proposal.id, "paused", None  # awaiting a human
 
         run.outcome = {"triage": triage, "order_id": state.get("order_id"), "summary": summary,
@@ -245,11 +260,49 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         db.add(AuditEvent(run_id=run.id, actor="agent", event_type="agent.routed",
                           redacted_payload={"route": route_, "reason": reason, "agreed": state.get("agreed")}))
         db.commit()
+        return {"proposal_id": proposal_id}
+
+    def await_approval(state: AgentState) -> dict:
+        """Pause until a human decides. On resume this node re-runs from the top,
+        so everything before interrupt() must be read-only (it is)."""
+        signal = interrupt({"proposal_id": state["proposal_id"], "run_id": state["run_id"]})
+        proposal = db.get(ActionProposal, state["proposal_id"], populate_existing=True)
+        db.commit()
+        # The stored status is the truth. A resume that says "approved" with no stored
+        # approval decides nothing: the run goes back to waiting.
+        return {"decision": DECISIONS.get(proposal.status, "pending"),
+                "execution": {"resume_signal": signal if isinstance(signal, str) else None}}
+
+    def execute_refund(state: AgentState) -> dict:
+        """The side-effect step, separate from the pause. refunds.execute is idempotent per
+        proposal (same reservation, same idempotency key), so re-running this node after a
+        crash continues the same refund instead of starting a second one."""
+        try:
+            op = refunds.execute(db, "agent", state["proposal_id"], deps.payment, deps.now())
+            return {"execution": {"status": op.status, "refund_operation_id": op.id}}
+        except ProviderUnavailable:
+            return {"execution": {"status": "provider_unavailable"}}  # reconciled later (Part 11)
+        except Conflict as e:
+            return {"execution": {"status": "refused", "code": e.code}}
+        except NotEligible as e:
+            return {"execution": {"status": "refused", "code": e.reason_code}}
+
+    def finalize(state: AgentState) -> dict:
+        run = db.get(WorkflowRun, state["run_id"], populate_existing=True)
+        decision = state["decision"]
+        if decision == "invalidated":
+            run.status, run.completed_at = "completed", deps.now()
+        # approved/rejected/expired: run and ticket states are owned by refunds/approvals services.
+        run.outcome = {**(run.outcome or {}), "decision": decision, "execution": state.get("execution")}
+        db.add(AuditEvent(run_id=run.id, actor="agent", event_type="agent.resumed",
+                          redacted_payload={"decision": decision, "execution": state.get("execution")}))
+        db.commit()
         return {}
 
     return {"load_ticket": load_ticket, "classify": classify, "resolve_order": resolve_order,
             "investigate": investigate, "summarize": summarize, "route": route, "cite_policy": cite_policy,
-            "draft_proposal": draft_proposal, "validate_proposal": validate_proposal, "record": record}
+            "draft_proposal": draft_proposal, "validate_proposal": validate_proposal, "record": record,
+            "await_approval": await_approval, "execute_refund": execute_refund, "finalize": finalize}
 
 
 # ---------------------------------------------------------------- read-only guard
@@ -285,6 +338,12 @@ def _if_proposing(nxt: str) -> Callable[[AgentState], str]:
     return lambda s: nxt if s.get("route") == "propose_refund" else "record"
 
 
+def _after_decision(s: AgentState) -> str:
+    if s["decision"] == "pending":
+        return "await_approval"  # woken without a stored decision: pause again
+    return "execute_refund" if s["decision"] == "approved" else "finalize"
+
+
 def build_graph(deps: AgentDeps, checkpointer=None):
     g = StateGraph(AgentState)
     for name, fn in _nodes(deps).items():
@@ -299,5 +358,9 @@ def build_graph(deps: AgentDeps, checkpointer=None):
     g.add_conditional_edges("cite_policy", _if_proposing("draft_proposal"), ["draft_proposal", "record"])
     g.add_conditional_edges("draft_proposal", _if_proposing("validate_proposal"), ["validate_proposal", "record"])
     g.add_edge("validate_proposal", "record")
-    g.add_edge("record", END)
+    g.add_conditional_edges("record", lambda s: "await_approval" if s.get("proposal_id") else END,
+                            ["await_approval", END])
+    g.add_conditional_edges("await_approval", _after_decision, ["await_approval", "execute_refund", "finalize"])
+    g.add_edge("execute_refund", "finalize")
+    g.add_edge("finalize", END)
     return g.compile(checkpointer=checkpointer or InMemorySaver())
