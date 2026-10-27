@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import engine, get_db
+from app.integrations.deps import get_service_client
 from app.integrations.http import ServiceClient
 from app.main import app
 from mocks.main import app as mocks_app
@@ -78,6 +79,13 @@ def as_customer(sub: str) -> dict:
     return auth(token_for(sub))
 
 
+STAFF = "staff|priya"
+
+
+def as_staff(sub: str = STAFF) -> dict:
+    return auth(token_for(sub, role="staff"))
+
+
 # ---------------------------------------------------------------- mock services
 
 # Clients give up after CLIENT_TIMEOUT_S; injected timeouts sleep FAULT_DELAY_S.
@@ -123,6 +131,13 @@ def service_client(mock_server_url, mock_admin):
     with ServiceClient(base_url=mock_server_url, connect_timeout_s=CLIENT_TIMEOUT_S,
                        read_timeout_s=CLIENT_TIMEOUT_S) as c:
         yield c
+
+
+@pytest.fixture
+def staff_client(client, service_client):
+    """API client whose payment/shipping clients talk to the in-test mock server."""
+    app.dependency_overrides[get_service_client] = lambda: service_client
+    yield client
 
 
 def inject(admin: httpx.Client, kind: str, operation: str | None = None,
