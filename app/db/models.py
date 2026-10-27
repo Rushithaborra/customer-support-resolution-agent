@@ -145,11 +145,17 @@ class Ticket(TimestampMixin, Base):
 
 
 RUN_STATUSES = ["running", "paused", "completed", "failed", "escalated"]
+# Chosen by code from code facts, never by the model (Part 6).
+AGENT_ROUTES = ["propose_refund", "explain_policy", "report_order_status", "escalate", "order_not_found"]
 
 
 class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
-    __table_args__ = (status_check("status", RUN_STATUSES, "ck_runs_status"),)
+    __table_args__ = (
+        status_check("status", RUN_STATUSES, "ck_runs_status"),
+        CheckConstraint("route IS NULL OR route IN (" + ", ".join(f"'{r}'" for r in AGENT_ROUTES) + ")",
+                        name="ck_runs_route"),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("run"))
     ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.id"), index=True)
@@ -159,6 +165,9 @@ class WorkflowRun(Base):
     status: Mapped[str] = mapped_column(String(20), default="running")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    route: Mapped[str | None] = mapped_column(String(30))
+    route_reason: Mapped[str | None] = mapped_column(String(100))
+    outcome: Mapped[dict | None] = mapped_column(JSONB)
 
 
 # ---------------------------------------------------------------- policies (RAG)
