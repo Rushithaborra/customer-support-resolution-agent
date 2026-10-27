@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +26,16 @@ class Settings(BaseSettings):
     # Every external call has explicit timeouts; httpx's defaults are not a policy.
     http_connect_timeout_s: float = 2.0
     http_read_timeout_s: float = 5.0
+
+    # LLM (Anthropic). The key is read here and passed to the SDK explicitly,
+    # because pydantic-settings loads .env into Settings, not into os.environ.
+    anthropic_api_key: str | None = None
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    llm_max_tokens: int = 16000
+    llm_timeout_s: float = 60.0
+    # Server-side refusal fallback: a declined request is re-run on another model in the same call.
+    llm_refusal_fallback: bool = True
 
 
 settings = Settings()
