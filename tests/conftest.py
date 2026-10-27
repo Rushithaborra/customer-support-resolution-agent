@@ -155,3 +155,14 @@ def agent(db, service_client):
     def run(ticket_id: str, llm):
         return run_agent(db, llm, ShippingClient(service_client), ticket_id, actor="staff:staff|priya")
     return run
+
+
+@pytest.fixture(scope="session", autouse=True)
+def policies_ingested():
+    """Policies are reference data (like the seed). Ingesting is idempotent, so it's
+    committed once per test session rather than rolled back per test."""
+    from app.db.session import SessionLocal
+    from app.policy.embedder import get_embedder
+    from app.policy.ingest import ingest_dir
+    with SessionLocal() as s:
+        ingest_dir(s, get_embedder())

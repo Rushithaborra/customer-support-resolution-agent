@@ -13,6 +13,12 @@ def test_downgrade_then_upgrade_round_trips():
     command.downgrade(cfg, "-1")
     command.upgrade(cfg, "head")
     command.check(cfg)  # raises if models and schema have drifted
+    # The round trip drops and re-adds the embedding column; restore the reference data.
+    from app.db.session import SessionLocal
+    from app.policy.embedder import get_embedder
+    from app.policy.ingest import ingest_dir
+    with SessionLocal() as s:
+        assert any(ingest_dir(s, get_embedder()).values())
 
 
 def test_new_statuses_accepted(db):

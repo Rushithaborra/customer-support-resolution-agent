@@ -16,7 +16,7 @@ def ctx(db, service_client):
 
 def test_catalog_is_read_only_and_fixed():
     assert set(TOOLS) == {"list_my_orders", "get_order", "get_return_status", "get_refund_status",
-                          "get_shipment", "check_refund_eligibility"}
+                          "get_shipment", "check_refund_eligibility", "search_policy"}
     for spec in tool_specs():
         schema = spec["input_schema"]
         assert schema["additionalProperties"] is False
