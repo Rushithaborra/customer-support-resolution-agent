@@ -37,5 +37,12 @@ class Settings(BaseSettings):
     # Server-side refusal fallback: a declined request is re-run on another model in the same call.
     llm_refusal_fallback: bool = True
 
+    # Policy retrieval: chunks below this cosine similarity (bge-small-en-v1.5) are not
+    # considered relevant. Calibrated from measured scores; see docs/parts/part-08-policy-rag.md.
+    policy_min_similarity: float = 0.70
+    # A persistent home for the embedding model (~130 MB). fastembed defaults to the OS temp
+    # dir, which macOS clears, forcing a re-download.
+    embedding_cache_dir: str = "~/.cache/fastembed"
+
 
 settings = Settings()

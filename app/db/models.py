@@ -11,18 +11,22 @@ Design rules enforced here (not in prompts, not in the LLM):
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -184,18 +188,24 @@ class PolicyDocument(Base):
     source_uri: Mapped[str] = mapped_column(String(500))
 
 
-class PolicyChunk(Base):
-    """The embedding column is added in the RAG part via its own migration,
-    once the embedding model (and therefore vector size) is chosen."""
+# BAAI/bge-small-en-v1.5. Changing the model means a migration for this size and a re-ingest.
+EMBEDDING_DIM = 384
 
+
+class PolicyChunk(Base):
     __tablename__ = "policy_chunks"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("chk"))
     document_id: Mapped[str] = mapped_column(String(64))
     document_version: Mapped[int] = mapped_column(Integer)
     section_ref: Mapped[str] = mapped_column(String(100))  # e.g. "section_3"
+    heading: Mapped[str] = mapped_column(String(200), server_default="")
     content: Mapped[str] = mapped_column(Text)
-    chunk_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    chunk_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)  # includes embedding_model
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    # Keyword side of hybrid search, maintained by Postgres itself.
+    search_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english', heading || ' ' || content)", persisted=True))
 
     __table_args__ = (
         # Composite FK: a chunk belongs to one exact document version.
@@ -204,6 +214,10 @@ class PolicyChunk(Base):
             ["policy_documents.id", "policy_documents.version"],
             name="fk_chunks_document_version",
         ),
+        UniqueConstraint("document_id", "document_version", "section_ref", name="uq_chunks_doc_version_section"),
+        Index("ix_chunks_embedding", "embedding", postgresql_using="hnsw",
+              postgresql_ops={"embedding": "vector_cosine_ops"}),
+        Index("ix_chunks_search_tsv", "search_tsv", postgresql_using="gin"),
     )
 
 
