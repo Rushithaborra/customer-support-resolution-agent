@@ -179,7 +179,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 5. LLM tools | LLM client, typed read tools, Pydantic structured outputs, repair-or-stop | Tools return structured success and failure; invalid output is caught | Done |
 | 6. Agent workflow | LangGraph state, classify, investigate, route; single-agent baseline | Each seed scenario routes to the right branch | Done |
 | 7. Proposals | Resolution proposals, payload hashing, code-side validation | Proposals carry evidence refs; wrong amounts are rejected by code | Done |
-| 8. Policy RAG | Synthetic versioned policies, chunking, embeddings, pgvector migration, citations | Correct policy section retrieved; no policy leads to escalation | Not started |
+| 8. Policy RAG | Synthetic versioned policies, chunking, embeddings, pgvector migration, citations | Correct policy section retrieved; no policy leads to escalation | Done |
 | 9. Human approval | Reviewer auth, approval API, `interrupt()` and resume, expiry, invalidation | Approve, reject and expire each follow their path after a restart | Not started |
 | 10. Async runs | Job persistence, worker, `202 Accepted`, run status and event timeline | A run survives worker restart and resumes | Not started |
 | 11. Refund safety | Reservation with `SELECT ... FOR UPDATE`, idempotent execution, reconciliation | Timeout, restart and concurrent tests produce zero duplicate refunds | Not started |
@@ -194,8 +194,8 @@ One decision blocks Part 5: which LLM provider to use. It sets the tool-calling 
 ### Open decisions
 
 - [x] LLM provider: Anthropic (`anthropic` SDK), default `claude-opus-5-5` at effort `medium`, set via `LLM_MODEL` — decided for Part 5
-- [ ] Embedding model and vector dimension — needed before Part 8. Local dev note: Homebrew's
-  `pgvector` package doesn't support `postgresql@16`; build pgvector from source against PG16 or use Docker.
+- [x] Embedding model: `BAAI/bge-small-en-v1.5` (384 dims, local via fastembed), similarity cutoff 0.70 —
+  decided for Part 8. pgvector 0.8.1 built from source for Homebrew PG16. Voyage is the Part 13 comparison.
 - [ ] Frontend stack (plain HTML + JS, React or Streamlit) — needed before Part 12
 - [ ] Worker approach (FastAPI BackgroundTasks or a queue such as Celery/RQ) — needed before Part 10
 - [x] Customer auth: signed HS256 JWT (PyJWT), `sub` → `customers.external_auth_subject` — decided for Part 2
