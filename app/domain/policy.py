@@ -3,7 +3,9 @@ but the numbers that decide money stay here, in code."""
 
 from datetime import timedelta
 
-POLICY_VERSION = "refund_policy@v1"
+# Must match the refund policy version currently in effect (policies/refund_policy_v2.md);
+# tests check that the numbers below appear in that text.
+POLICY_VERSION = "refund_policy@v2"
 
 # A return must reach the warehouse within this many days of delivery.
 RETURN_WINDOW_DAYS = 30
