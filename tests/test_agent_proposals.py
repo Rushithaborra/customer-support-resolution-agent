@@ -5,10 +5,11 @@ from sqlalchemy import select
 
 from app.db.models import ActionProposal, Ticket
 from app.llm.fake import ScriptedLLM, text_turn, tool_turn
-from tests.conftest import ASHA, as_customer, as_staff
+from tests.conftest import ASHA, as_customer, as_reviewer, as_staff
 from tests.agent_scripts import draft, open_ticket, refund_script, summary, triage
 
 STAFF = as_staff()
+REVIEWER_H = as_reviewer()
 
 
 def proposals_for(db, run_id: str) -> list[ActionProposal]:
@@ -90,7 +91,7 @@ def test_agent_proposal_approved_and_executed_once(agent, ticket, staff_client, 
     run = agent(ticket, refund_script(draft("ord_1001")))
     p = staff_client.get(f"/staff/proposals/{run.outcome['proposal_id']}", headers=STAFF).json()
 
-    assert staff_client.post(f"/staff/proposals/{p['id']}/approve", headers=STAFF,
+    assert staff_client.post(f"/staff/proposals/{p['id']}/approve", headers=REVIEWER_H,
                              json={"payload_hash": p["payload_hash"]}).status_code == 200
     op = staff_client.post(f"/staff/proposals/{p['id']}/execute", headers=STAFF).json()
     assert (op["status"], op["amount_minor"]) == ("succeeded", 249900)
@@ -99,14 +100,14 @@ def test_agent_proposal_approved_and_executed_once(agent, ticket, staff_client, 
     assert db.get(Ticket, ticket).status == "resolved"
 
 
-def test_editing_evidence_after_approval_invalidates_it(agent, ticket, staff_client, mock_admin, db):
+def test_editing_evidence_blocks_approval(agent, ticket, staff_client, mock_admin, db):
     run = agent(ticket, refund_script(draft("ord_1001")))
     p = db.get(ActionProposal, run.outcome["proposal_id"])
-    staff_client.post(f"/staff/proposals/{p.id}/approve", headers=STAFF, json={"payload_hash": p.payload_hash})
+    seen_hash = p.payload_hash
     p.payload = {**p.payload, "evidence_refs": ["get_order:ord_1001"]}
     db.commit()
-    r = staff_client.post(f"/staff/proposals/{p.id}/execute", headers=STAFF)
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "approval_does_not_match_payload"
+    r = staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER_H, json={"payload_hash": seen_hash})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "payload_tampered"
     assert mock_admin.get("/payment/refunds", params={"idempotency_key": f"refund-{p.id}"}).json()["refunds"] == []
 
 

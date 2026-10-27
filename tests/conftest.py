@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import engine, get_db
+from app.agent.checkpoint import get_checkpointer, open_checkpointer
 from app.integrations.deps import get_service_client
 from app.integrations.http import ServiceClient
 from app.main import app
@@ -41,11 +42,31 @@ def db():
 
 
 @pytest.fixture
-def client(db):
-    """API client whose requests share the test's rolled-back session."""
+def client(db, checkpointer):
+    """API client whose requests share the test's rolled-back session and checkpointer."""
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_checkpointer] = lambda: checkpointer
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(scope="session")
+def checkpointer_pool():
+    """Durable (Postgres) checkpoints, as in production. Business rows roll back per test,
+    but checkpoints are written on their own connection, so `checkpointer` cleans up threads."""
+    saver, pool = open_checkpointer()
+    yield saver
+    pool.close()
+
+
+@pytest.fixture
+def checkpointer(checkpointer_pool):
+    yield checkpointer_pool
+    with checkpointer_pool.conn.connection() as conn:  # remove this test's threads
+        threads = [r["thread_id"] for r in conn.execute(
+            "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'agent-%'").fetchall()]
+    for t in threads:
+        checkpointer_pool.delete_thread(t)
 
 
 def token_for(sub: str, *, secret: str | None = None, algorithm: str | None = None,
@@ -80,10 +101,15 @@ def as_customer(sub: str) -> dict:
 
 
 STAFF = "staff|priya"
+REVIEWER = "reviewer|ravi"
 
 
 def as_staff(sub: str = STAFF) -> dict:
     return auth(token_for(sub, role="staff"))
+
+
+def as_reviewer(sub: str = REVIEWER) -> dict:
+    return auth(token_for(sub, role="reviewer"))
 
 
 # ---------------------------------------------------------------- mock services
@@ -147,13 +173,14 @@ def inject(admin: httpx.Client, kind: str, operation: str | None = None,
 
 
 @pytest.fixture
-def agent(db, service_client):
-    """Run the agent graph on a ticket with a scripted LLM against the real DB and mocks."""
+def agent(db, service_client, checkpointer):
+    """Run the agent graph on a ticket with a scripted LLM against the real DB, mocks and checkpointer."""
     from app.agent.runner import run_agent
     from app.integrations.shipping import ShippingClient
 
     def run(ticket_id: str, llm):
-        return run_agent(db, llm, ShippingClient(service_client), ticket_id, actor="staff:staff|priya")
+        return run_agent(db, llm, ShippingClient(service_client), ticket_id, actor="staff:staff|priya",
+                         checkpointer=checkpointer)
     return run
 
 

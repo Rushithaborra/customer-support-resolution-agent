@@ -10,9 +10,10 @@ from app.integrations.deps import get_payment_client
 from app.integrations.payment import PaymentClient
 from app.integrations.results import Rejected
 from app.main import app
-from tests.conftest import ASHA, VIKRAM, as_customer, as_staff, inject
+from tests.conftest import ASHA, VIKRAM, as_customer, as_reviewer, as_staff, inject
 
 STAFF = as_staff()
+REVIEWER_H = as_reviewer()
 
 
 # ---------------------------------------------------------------- helpers
@@ -34,7 +35,7 @@ def propose(client, tid: str) -> dict:
 
 
 def approve(client, proposal: dict) -> None:
-    r = client.post(f"/staff/proposals/{proposal['id']}/approve", headers=STAFF,
+    r = client.post(f"/staff/proposals/{proposal['id']}/approve", headers=REVIEWER_H,
                     json={"payload_hash": proposal["payload_hash"]})
     assert r.status_code == 200, r.json()
 
@@ -87,7 +88,7 @@ def test_refund_resolves_end_to_end(staff_client, mock_admin, db):
     assert customer_view(client, tid)["outcome"] == {
         "state": "succeeded", "message": "Your refund of ₹2,499.00 has been completed by our payment provider."}
     approval = db.query(Approval).filter_by(proposal_id=p["id"]).one()
-    assert approval.reviewer_id == "staff|priya"  # from the token, server-side
+    assert approval.reviewer_id == "reviewer|ravi"  # from the reviewer's token, server-side
 
 
 # ---------------------------------------------------------------- code says no
@@ -136,7 +137,7 @@ def test_execute_without_approval_is_refused(staff_client, mock_admin):
 
 def test_approving_a_different_hash_is_refused(staff_client):
     p = propose(staff_client, open_ticket(staff_client, "ord_1001"))
-    r = staff_client.post(f"/staff/proposals/{p['id']}/approve", headers=STAFF, json={"payload_hash": "0" * 64})
+    r = staff_client.post(f"/staff/proposals/{p['id']}/approve", headers=REVIEWER_H, json={"payload_hash": "0" * 64})
     assert r.status_code == 409 and r.json()["detail"]["code"] == "payload_hash_mismatch"
 
 
@@ -165,7 +166,7 @@ def test_new_proposal_supersedes_old_one(staff_client):
     tid = open_ticket(staff_client, "ord_1001")
     first = propose(staff_client, tid)
     propose(staff_client, tid)
-    r = staff_client.post(f"/staff/proposals/{first['id']}/approve", headers=STAFF,
+    r = staff_client.post(f"/staff/proposals/{first['id']}/approve", headers=REVIEWER_H,
                           json={"payload_hash": first["payload_hash"]})
     assert r.status_code == 409 and r.json()["detail"]["code"] == "not_pending"
 
@@ -173,7 +174,7 @@ def test_new_proposal_supersedes_old_one(staff_client):
 def test_reject_reopens_ticket(staff_client, db):
     tid = open_ticket(staff_client, "ord_1001")
     p = propose(staff_client, tid)
-    assert staff_client.post(f"/staff/proposals/{p['id']}/reject", headers=STAFF).json()["status"] == "rejected"
+    assert staff_client.post(f"/staff/proposals/{p['id']}/reject", headers=REVIEWER_H).json()["proposal"]["status"] == "rejected"
     assert db.get(Ticket, tid).status == "open"
 
 

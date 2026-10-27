@@ -11,9 +11,10 @@ from app.integrations.shipping import ShippingClient
 from app.llm.fake import ScriptedLLM, text_turn, tool_turn
 from app.policy.embedder import get_embedder
 from tests.agent_scripts import draft, full_script, open_ticket, refund_script, summary, triage
-from tests.conftest import ASHA, VIKRAM, as_staff
+from tests.conftest import ASHA, VIKRAM, as_reviewer, as_staff
 
 STAFF = as_staff()
+REVIEWER_H = as_reviewer()
 
 
 @pytest.mark.parametrize("who, order_id, category, tool, step, cited", [
@@ -51,14 +52,17 @@ def test_reason_with_no_written_policy_escalates(client, agent):
     assert run.outcome["policy_query"] is None
 
 
-def test_editing_citations_after_approval_blocks_execution(client, agent, staff_client, db, mock_admin):
+def test_editing_citations_blocks_approval(client, agent, staff_client, db, mock_admin):
+    # Agent proposals execute as soon as they're approved, so the tamper window is before approval:
+    # the reviewer sends back the hash they saw, which no longer matches the stored payload.
     run = agent(open_ticket(client, "refund?", "ord_1001"), refund_script(draft("ord_1001")))
     p = db.get(ActionProposal, run.outcome["proposal_id"])
-    staff_client.post(f"/staff/proposals/{p.id}/approve", headers=STAFF, json={"payload_hash": p.payload_hash})
+    seen_hash = p.payload_hash
     p.payload = {**p.payload, "policy_citations": ["refund_policy@v1#section_1"]}  # swap to the retired version
     db.commit()
-    r = staff_client.post(f"/staff/proposals/{p.id}/execute", headers=STAFF)
-    assert r.status_code == 409
+    r = staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER_H, json={"payload_hash": seen_hash})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "payload_tampered"
+    assert mock_admin.get("/payment/refunds", params={"idempotency_key": f"refund-{p.id}"}).json()["refunds"] == []
 
 
 def test_staff_proposal_cites_policy_and_needs_one(staff_client, db):
