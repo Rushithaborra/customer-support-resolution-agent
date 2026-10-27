@@ -13,15 +13,15 @@ router = APIRouter(prefix="/tickets", tags=["tickets"])
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
 def create(body: TicketCreate, customer: Customer = Depends(get_current_customer),
            db: Session = Depends(get_db)):
-    return tickets.create_ticket(db, customer, body.message, body.order_id)
+    return tickets.with_outcome(db, tickets.create_ticket(db, customer, body.message, body.order_id), TicketOut)
 
 
 @router.get("", response_model=list[TicketOut])
 def list_mine(customer: Customer = Depends(get_current_customer), db: Session = Depends(get_db)):
-    return tickets.list_tickets(db, customer.id)
+    return [tickets.with_outcome(db, t, TicketOut) for t in tickets.list_tickets(db, customer.id)]
 
 
 @router.get("/{ticket_id}", response_model=TicketOut)
 def get_mine(ticket_id: str, customer: Customer = Depends(get_current_customer),
              db: Session = Depends(get_db)):
-    return tickets.get_owned_ticket(db, customer.id, ticket_id)
+    return tickets.with_outcome(db, tickets.get_owned_ticket(db, customer.id, ticket_id), TicketOut)
