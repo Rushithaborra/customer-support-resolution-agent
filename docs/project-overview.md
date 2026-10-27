@@ -177,7 +177,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 3. Mock services | Payment, shipping, ticket APIs with timeouts, errors and idempotency-key contract | Same key + payload returns same operation; changed payload rejected | Done |
 | 4. Deterministic resolution | Eligibility rules in code, manual resolution endpoints | A refund ticket resolves end to end with no LLM | Done |
 | 5. LLM tools | LLM client, typed read tools, Pydantic structured outputs, repair-or-stop | Tools return structured success and failure; invalid output is caught | Done |
-| 6. Agent workflow | LangGraph state, classify, investigate, route; single-agent baseline | Each seed scenario routes to the right branch | Not started |
+| 6. Agent workflow | LangGraph state, classify, investigate, route; single-agent baseline | Each seed scenario routes to the right branch | Done |
 | 7. Proposals | Resolution proposals, payload hashing, code-side validation | Proposals carry evidence refs; wrong amounts are rejected by code | Not started |
 | 8. Policy RAG | Synthetic versioned policies, chunking, embeddings, pgvector migration, citations | Correct policy section retrieved; no policy leads to escalation | Not started |
 | 9. Human approval | Reviewer auth, approval API, `interrupt()` and resume, expiry, invalidation | Approve, reject and expire each follow their path after a restart | Not started |
