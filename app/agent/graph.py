@@ -2,6 +2,7 @@
 
   load_ticket → classify → resolve_order → investigate → summarize → route → record
                     └──────────── early exit (route already set) ─────────────┘
+                                     route=propose_refund → draft_proposal → validate_proposal → record
 
 Two rules shape it:
 - Code picks the route. The model's recommended next step is recorded and
@@ -17,21 +18,23 @@ from typing import TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.agent.loop import run_tool_loop
 from app.agent.prompts import INVESTIGATE_SYSTEM, TRIAGE_SYSTEM, wrap_customer_message
-from app.agent.schemas import InvestigationSummary, TicketTriage
+from app.agent.schemas import InvestigationSummary, RefundProposalDraft, TicketTriage
 from app.agent.tools import ToolContext
-from app.db.models import AuditEvent, Ticket, WorkflowRun
+from app.db.models import ActionProposal, AuditEvent, Ticket, WorkflowRun
 from app.domain.eligibility import assess_damage, evaluate_refund
+from app.domain.proposal_rules import validate_refund_draft
 from app.integrations.shipping import ShippingClient
 from app.llm.structured import Parsed, structured_call
 from app.llm.types import LLM, Usage
 from app.services.errors import NotFound
 from app.services.facts import load_order_facts
 from app.services.orders import get_owned_order
+from app.services.proposals import build_refund_payload, create_refund_proposal
 
 WRITER_NODES = {"record"}
 
@@ -53,6 +56,9 @@ class AgentState(TypedDict, total=False):
     route: str | None
     route_reason: str | None
     agreed: bool | None
+    proposal_draft: dict | None
+    proposal_violations: list[dict] | None
+    proposal_payload: dict | None
     usage: dict
     models: list[str]
 
@@ -156,8 +162,37 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         return {"route": chosen[0], "route_reason": chosen[1],
                 "agreed": state.get("model_suggestion") == chosen[0]}
 
+    def draft_proposal(state: AgentState) -> dict:
+        calls = "\n".join(f"- {t['tool']}({t['input']}): {'ok' if t['ok'] else t['code']}" for t in state["trace"])
+        findings = "\n".join(f"- {f['statement']} [{f['evidence_ref']}]" for f in state["summary"]["findings"])
+        content = (f"Draft a refund proposal for order {state['order_id']}.\n"
+                   f"Cite as evidence_refs only tool calls listed below that succeeded.\n\n"
+                   f"Tool calls made:\n{calls}\n\nFindings:\n{findings}\n\n"
+                   f"Investigator's notes:\n{state['investigation_text']}")
+        r = structured_call(llm, system=INVESTIGATE_SYSTEM, model=RefundProposalDraft,
+                            messages=[{"role": "user", "content": content}])
+        if not isinstance(r, Parsed):
+            return {**_escalate(f"proposal_draft_failed:{r.reason}"), **_add_usage(state, r.usage, [])}
+        return {"proposal_draft": r.value.model_dump(), **_add_usage(state, r.usage, [r.model])}
+
+    def validate_proposal(state: AgentState) -> dict:
+        """Code checks the draft against fresh facts and this run's own tool trace.
+        The payload that goes forward is built by code; the draft only contributes refs and rationale."""
+        draft = state["proposal_draft"]
+        facts = load_order_facts(db, state["order_id"])
+        db.commit()
+        decision = evaluate_refund(facts)
+        violations = validate_refund_draft(draft, resolved_order_id=state["order_id"], decision=decision,
+                                           currency=facts.currency, trace=state["trace"])
+        if violations:
+            return {**_escalate(f"proposal_rejected:{violations[0].code}"),
+                    "proposal_violations": [{"code": v.code, "detail": v.detail} for v in violations]}
+        payload = build_refund_payload(state["ticket_id"], facts, decision, evidence_refs=draft["evidence_refs"],
+                                       proposed_by="agent", rationale=draft["rationale"])
+        return {"proposal_payload": payload}
+
     def record(state: AgentState) -> dict:
-        """The only writer. Idempotent: sets fields, so re-running it converges."""
+        """The only writer. Idempotent: sets fields, and reuses this run's proposal if one exists."""
         run = db.get(WorkflowRun, state["run_id"])
         ticket = db.get(Ticket, state["ticket_id"])
         route_, reason = state["route"], state["route_reason"]
@@ -166,9 +201,19 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         run.route, run.route_reason = route_, reason
         run.status = "escalated" if route_ == "escalate" else "completed"
         run.completed_at = deps.now()
+
+        proposal_id = None
+        payload = state.get("proposal_payload")
+        if route_ == "propose_refund" and payload:
+            existing = db.scalar(select(ActionProposal).where(ActionProposal.run_id == run.id))
+            proposal = existing or create_refund_proposal(db, run=run, ticket=ticket, payload=payload, actor="agent")
+            proposal_id, run.status, run.completed_at = proposal.id, "paused", None  # awaiting a human
+
         run.outcome = {"triage": triage, "order_id": state.get("order_id"), "summary": summary,
                        "trace": state.get("trace", []), "model_suggestion": state.get("model_suggestion"),
-                       "agreed": state.get("agreed"), "usage": state.get("usage"), "models": state.get("models")}
+                       "agreed": state.get("agreed"), "usage": state.get("usage"), "models": state.get("models"),
+                       "proposal_draft": state.get("proposal_draft"),
+                       "proposal_violations": state.get("proposal_violations"), "proposal_id": proposal_id}
 
         if triage and ticket.category == "unclassified":  # never overwrite a human's classification
             ticket.category = triage["category"]
@@ -184,7 +229,8 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         return {}
 
     return {"load_ticket": load_ticket, "classify": classify, "resolve_order": resolve_order,
-            "investigate": investigate, "summarize": summarize, "route": route, "record": record}
+            "investigate": investigate, "summarize": summarize, "route": route,
+            "draft_proposal": draft_proposal, "validate_proposal": validate_proposal, "record": record}
 
 
 # ---------------------------------------------------------------- read-only guard
@@ -216,6 +262,10 @@ def _next_or_record(nxt: str) -> Callable[[AgentState], str]:
     return lambda s: "record" if s.get("route") else nxt
 
 
+def _if_proposing(nxt: str) -> Callable[[AgentState], str]:
+    return lambda s: nxt if s.get("route") == "propose_refund" else "record"
+
+
 def build_graph(deps: AgentDeps, checkpointer=None):
     g = StateGraph(AgentState)
     for name, fn in _nodes(deps).items():
@@ -226,6 +276,8 @@ def build_graph(deps: AgentDeps, checkpointer=None):
     g.add_conditional_edges("resolve_order", _next_or_record("investigate"), ["investigate", "record"])
     g.add_conditional_edges("investigate", _next_or_record("summarize"), ["summarize", "record"])
     g.add_conditional_edges("summarize", _next_or_record("route"), ["route", "record"])
-    g.add_edge("route", "record")
+    g.add_conditional_edges("route", _if_proposing("draft_proposal"), ["draft_proposal", "record"])
+    g.add_conditional_edges("draft_proposal", _if_proposing("validate_proposal"), ["validate_proposal", "record"])
+    g.add_edge("validate_proposal", "record")
     g.add_edge("record", END)
     return g.compile(checkpointer=checkpointer or InMemorySaver())

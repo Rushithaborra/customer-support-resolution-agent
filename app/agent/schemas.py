@@ -1,5 +1,6 @@
 """What the model must return. Validators here enforce what a JSON schema can't."""
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -35,6 +36,26 @@ class Finding(BaseModel):
     statement: str = Field(min_length=1, max_length=300)
     evidence_ref: str = Field(pattern=EVIDENCE_REF_PATTERN,
                               description="The tool call this rests on, e.g. get_return_status:ord_1001")
+
+
+class RefundProposalDraft(BaseModel):
+    """The agent's draft. Every field is checked against code facts and the run's tool trace;
+    the amount is compared with the rules' amount, never used as-is."""
+    model_config = ConfigDict(extra="forbid")
+
+    order_id: str = Field(pattern=ORDER_ID_PATTERN)
+    amount_minor: int = Field(description="Refund amount in paise (1 rupee = 100 paise)")
+    currency: Literal["INR"]
+    evidence_refs: list[str] = Field(min_length=1, max_length=10,
+                                     description="Tool calls this proposal rests on, e.g. check_refund_eligibility:ord_1001")
+    rationale: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def refs_well_formed(self) -> "RefundProposalDraft":
+        bad = [r for r in self.evidence_refs if not re.fullmatch(EVIDENCE_REF_PATTERN, r)]
+        if bad:
+            raise ValueError("evidence_refs must look like tool_name:ord_xxxx or list_my_orders")
+        return self
 
 
 class InvestigationSummary(BaseModel):
