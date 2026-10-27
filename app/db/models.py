@@ -238,6 +238,8 @@ class ActionProposal(TimestampMixin, Base):
     # the hash changes and the old approval no longer matches.
     payload_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="pending_approval")
+    # "agent" or the staff subject. Four-eyes: the creator can never approve it.
+    created_by: Mapped[str | None] = mapped_column(String(64))
 
 
 APPROVAL_DECISIONS = ["pending", "approved", "rejected"]
