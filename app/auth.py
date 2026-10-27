@@ -1,10 +1,11 @@
-"""Customer authentication.
+"""Authentication for customers and staff.
 
-Identity comes from a verified token's 'sub' claim, matched to
-customers.external_auth_subject. Nothing in the request body or message
-text can change who the caller is.
+Identity comes from a verified token's claims, never from the request body
+or message text. Customers: 'sub' matched to customers.external_auth_subject.
+Staff: a token carrying role="staff"; its 'sub' becomes the reviewer id.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -26,9 +27,21 @@ _UNAUTHORIZED = HTTPException(
     detail="Invalid or missing credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
+_FORBIDDEN = HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+
+STAFF_ROLE = "staff"
 
 
-def issue_token(subject: str, ttl_minutes: int | None = None) -> str:
+@dataclass(frozen=True)
+class Staff:
+    subject: str  # e.g. "staff|priya"; stored as reviewer_id / audit actor
+
+    @property
+    def actor(self) -> str:
+        return f"staff:{self.subject}"
+
+
+def issue_token(subject: str, ttl_minutes: int | None = None, role: str | None = None) -> str:
     """Mint a token the way a dev identity provider would. Used by
     scripts/mint_token.py and tests; a real deployment gets tokens from its IdP."""
     now = datetime.now(timezone.utc)
@@ -39,21 +52,16 @@ def issue_token(subject: str, ttl_minutes: int | None = None) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=ttl_minutes or settings.jwt_ttl_minutes),
     }
+    if role:
+        claims["role"] = role
     return jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def get_current_customer(
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
-) -> Customer:
-    """FastAPI dependency: the authenticated customer, or 401.
-
-    Every failure returns the same response, so a caller can't tell
-    'bad signature' from 'unknown user'."""
+def _decode(creds: HTTPAuthorizationCredentials | None) -> dict:
     if creds is None:
         raise _UNAUTHORIZED
     try:
-        claims = jwt.decode(
+        return jwt.decode(
             creds.credentials,
             settings.jwt_secret,
             # Pinned list: rejects alg=none and algorithm-switching tokens.
@@ -65,8 +73,26 @@ def get_current_customer(
     except jwt.PyJWTError:
         raise _UNAUTHORIZED
 
+
+def get_current_customer(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> Customer:
+    """FastAPI dependency: the authenticated customer, or 401.
+
+    Every failure returns the same response, so a caller can't tell
+    'bad signature' from 'unknown user'."""
+    claims = _decode(creds)
     customer = db.scalar(select(Customer).where(Customer.external_auth_subject == claims["sub"]))
     if customer is None:
         # Never auto-create: a valid signature for an unknown subject is still not a customer.
         raise _UNAUTHORIZED
     return customer
+
+
+def get_current_staff(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Staff:
+    """FastAPI dependency: 401 if not authenticated, 403 if authenticated but not staff."""
+    claims = _decode(creds)
+    if claims.get("role") != STAFF_ROLE:
+        raise _FORBIDDEN
+    return Staff(subject=claims["sub"])
