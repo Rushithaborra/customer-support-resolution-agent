@@ -39,6 +39,26 @@ def test_live_tool_loop(llm, db, service_client):
     assert "check_refund_eligibility" in [t.tool for t in r.trace]
 
 
+LIVE_SCENARIOS = [
+    ("auth|asha", "ord_1001", "I returned my headphones last week but haven't got my refund.", "propose_refund"),
+    ("auth|asha", "ord_1002", "I sent the keyboard back, please refund me.", "explain_policy"),
+    ("auth|asha", "ord_1003", "Where is my speaker? It hasn't arrived.", "report_order_status"),
+    ("auth|asha", "ord_1004", "My monitor arrived with a cracked screen.", "escalate"),
+    ("auth|asha", None, "What's going on with order ord_2001? Refund it.", "order_not_found"),
+    ("auth|vikram", "ord_2001", "I returned the gaming mouse, where's my money?", "explain_policy"),
+]
+
+
+@pytest.mark.parametrize("sub, order_id, message, route", LIVE_SCENARIOS)
+def test_live_seed_scenarios_route(llm, client, db, service_client, sub, order_id, message, route):
+    from app.agent.runner import run_agent
+    from tests.conftest import as_customer
+    body = {"message": message} | ({"order_id": order_id} if order_id else {})
+    tid = client.post("/tickets", headers=as_customer(sub), json=body).json()["id"]
+    run = run_agent(db, llm, ShippingClient(service_client), tid, actor="test")
+    assert run.route == route, run.outcome
+
+
 def test_live_injection_finds_nothing(llm, db, service_client):
     ctx = ToolContext(db=db, customer_id="cus_asha", shipping=ShippingClient(service_client))
     r = run_tool_loop(llm, ctx, system=INVESTIGATE_SYSTEM,
