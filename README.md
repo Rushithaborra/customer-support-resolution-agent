@@ -3,8 +3,9 @@
 AI agent that takes a customer complaint from "what happened?" to a verified outcome,
 using business data, versioned policies, controlled tools and human approval.
 
-**Status:** Parts 1–3 done: foundation, token auth with ownership checks, and mock
-external services with an idempotency contract. See `docs/project-overview.md`.
+**Status:** Parts 1–4 done: foundation, token auth with ownership checks, mock external
+services with an idempotency contract, and a full manual (no-LLM) resolution path: eligibility
+rules in code, hash-bound approvals, and exactly-once refund execution. See `docs/project-overview.md`.
 
 ## Scope (v1)
 One store, one currency (INR). Three complaint types: order status, refund request,
