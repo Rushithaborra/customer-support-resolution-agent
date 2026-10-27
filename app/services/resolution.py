@@ -10,10 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import Staff
-from app.db.models import ActionProposal, Approval, AuditEvent, Ticket, WorkflowRun
+from app.db.models import ActionProposal, AuditEvent, Ticket, WorkflowRun
 from app.domain.eligibility import assess_damage, evaluate_refund
-from app.domain.hashing import payload_hash
-from app.domain.policy import APPROVAL_TTL, POLICY_VERSION
+from app.domain.policy import POLICY_VERSION
 from app.integrations.results import Ok
 from app.integrations.shipping import ShippingClient
 from app.policy.embedder import Embedder
@@ -110,7 +109,8 @@ def propose_refund(db: Session, staff: Staff, ticket_id: str, embedder: Embedder
     run = WorkflowRun(ticket_id=ticket.id, thread_id=f"manual-{uuid.uuid4().hex}", status="paused")
     db.add(run)
     db.flush()
-    proposal = create_refund_proposal(db, run=run, ticket=ticket, payload=payload, actor=staff.actor)
+    proposal = create_refund_proposal(db, run=run, ticket=ticket, payload=payload, actor=staff.actor,
+                                      created_by=staff.subject)
     db.commit()
     return proposal
 
@@ -120,43 +120,6 @@ def list_proposals(db: Session, status: str | None) -> list[ActionProposal]:
     if status:
         q = q.where(ActionProposal.status == status)
     return list(db.scalars(q).all())
-
-
-def approve(db: Session, staff: Staff, proposal_id: str, presented_hash: str, now: datetime) -> Approval:
-    """The reviewer sends back the hash of what they reviewed. If the proposal
-    changed since, the hashes differ and the approval is refused."""
-    proposal = get_proposal(db, proposal_id)
-    if proposal.status != "pending_approval":
-        raise Conflict("not_pending", f"Proposal is {proposal.status}")
-    if presented_hash != proposal.payload_hash:
-        raise Conflict("payload_hash_mismatch", "The proposal changed since it was reviewed")
-    if payload_hash(proposal.payload) != proposal.payload_hash:
-        raise Conflict("payload_tampered", "Stored payload no longer matches its hash")
-
-    approval = Approval(proposal_id=proposal.id, approved_payload_hash=proposal.payload_hash,
-                        reviewer_id=staff.subject, decision="approved",
-                        expires_at=now + APPROVAL_TTL, decided_at=now)
-    db.add(approval)
-    proposal.status = "approved"
-    _audit(db, staff.actor, "proposal.approved", run_id=proposal.run_id, proposal_id=proposal.id,
-           approved_payload_hash=proposal.payload_hash)
-    db.commit()
-    return approval
-
-
-def reject(db: Session, staff: Staff, proposal_id: str, now: datetime) -> ActionProposal:
-    proposal = get_proposal(db, proposal_id)
-    if proposal.status != "pending_approval":
-        raise Conflict("not_pending", f"Proposal is {proposal.status}")
-    db.add(Approval(proposal_id=proposal.id, approved_payload_hash=proposal.payload_hash,
-                    reviewer_id=staff.subject, decision="rejected", expires_at=now, decided_at=now))
-    proposal.status = "rejected"
-    run = db.get(WorkflowRun, proposal.run_id)
-    run.status, run.completed_at = "completed", now
-    db.get(Ticket, run.ticket_id).status = "open"
-    _audit(db, staff.actor, "proposal.rejected", run_id=run.id, proposal_id=proposal.id)
-    db.commit()
-    return proposal
 
 
 def close_ticket(db: Session, staff: Staff, ticket_id: str, outcome: str, summary: str) -> Ticket:

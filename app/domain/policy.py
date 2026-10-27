@@ -14,3 +14,5 @@ DAMAGE_REPORT_WINDOW_DAYS = 7
 
 # How long a reviewer's approval stays valid before execution.
 APPROVAL_TTL = timedelta(hours=24)
+# How long a proposal may wait for a reviewer before it expires and goes to a human.
+PROPOSAL_TTL = timedelta(hours=48)

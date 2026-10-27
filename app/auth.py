@@ -28,17 +28,20 @@ _UNAUTHORIZED = HTTPException(
     headers={"WWW-Authenticate": "Bearer"},
 )
 _FORBIDDEN = HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+_REVIEWER_ONLY = HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reviewer role required")
 
-STAFF_ROLE = "staff"
+STAFF_ROLE = "staff"        # operates tickets: classify, run the agent, propose, execute
+REVIEWER_ROLE = "reviewer"  # decides: approve / reject proposals (and may read staff views)
 
 
 @dataclass(frozen=True)
 class Staff:
     subject: str  # e.g. "staff|priya"; stored as reviewer_id / audit actor
+    role: str = STAFF_ROLE
 
     @property
     def actor(self) -> str:
-        return f"staff:{self.subject}"
+        return f"{self.role}:{self.subject}"
 
 
 def issue_token(subject: str, ttl_minutes: int | None = None, role: str | None = None) -> str:
@@ -91,8 +94,17 @@ def get_current_customer(
 
 
 def get_current_staff(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Staff:
-    """FastAPI dependency: 401 if not authenticated, 403 if authenticated but not staff."""
+    """FastAPI dependency: 401 if not authenticated, 403 if not staff or reviewer."""
     claims = _decode(creds)
-    if claims.get("role") != STAFF_ROLE:
+    if claims.get("role") not in (STAFF_ROLE, REVIEWER_ROLE):
         raise _FORBIDDEN
-    return Staff(subject=claims["sub"])
+    return Staff(subject=claims["sub"], role=claims["role"])
+
+
+def get_current_reviewer(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Staff:
+    """Only reviewers may approve or reject. Separating the roles means operating a
+    ticket and authorising its money are different permissions."""
+    reviewer = get_current_staff(creds)
+    if reviewer.role != REVIEWER_ROLE:
+        raise _REVIEWER_ONLY
+    return reviewer

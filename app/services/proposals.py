@@ -41,7 +41,7 @@ def build_refund_payload(ticket_id: str, facts: OrderFacts, decision: RefundDeci
 
 
 def create_refund_proposal(db: Session, *, run: WorkflowRun, ticket: Ticket, payload: dict,
-                           actor: str) -> ActionProposal:
+                           actor: str, created_by: str) -> ActionProposal:
     """Insert a pending proposal. Does NOT commit: the caller owns the transaction."""
     # One live proposal per ticket: older unexecuted ones can no longer be approved or run.
     stale = db.scalars(
@@ -53,7 +53,7 @@ def create_refund_proposal(db: Session, *, run: WorkflowRun, ticket: Ticket, pay
         p.status = "superseded"
 
     proposal = ActionProposal(run_id=run.id, action_type="refund", payload=payload,
-                              payload_hash=payload_hash(payload))
+                              payload_hash=payload_hash(payload), created_by=created_by)
     db.add(proposal)
     db.flush()
     ticket.status = "awaiting_approval"
