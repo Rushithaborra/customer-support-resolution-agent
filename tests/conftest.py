@@ -2,16 +2,23 @@
 
 import base64
 import json
+import socket
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import jwt
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import engine, get_db
+from app.integrations.http import ServiceClient
 from app.main import app
+from mocks.main import app as mocks_app
 
 ASHA = "auth|asha"
 VIKRAM = "auth|vikram"
@@ -69,3 +76,56 @@ def auth(token: str) -> dict:
 
 def as_customer(sub: str) -> dict:
     return auth(token_for(sub))
+
+
+# ---------------------------------------------------------------- mock services
+
+# Clients give up after CLIENT_TIMEOUT_S; injected timeouts sleep FAULT_DELAY_S.
+CLIENT_TIMEOUT_S = 0.3
+FAULT_DELAY_S = 1.0
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def mock_server_url():
+    """The mock services on a real socket, so timeouts are real network timeouts."""
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(mocks_app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError("mock server did not start")
+        time.sleep(0.02)
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+@pytest.fixture
+def mock_admin(mock_server_url):
+    """Raw HTTP access to the mocks (admin controls and contract checks).
+    Resets provider state and faults before each test."""
+    with httpx.Client(base_url=mock_server_url, timeout=5,
+                      headers={"Authorization": f"Bearer {settings.mock_api_key}"}) as c:
+        c.post("/_admin/reset").raise_for_status()
+        yield c
+
+
+@pytest.fixture
+def service_client(mock_server_url, mock_admin):
+    with ServiceClient(base_url=mock_server_url, connect_timeout_s=CLIENT_TIMEOUT_S,
+                       read_timeout_s=CLIENT_TIMEOUT_S) as c:
+        yield c
+
+
+def inject(admin: httpx.Client, kind: str, operation: str | None = None,
+           delay_s: float = FAULT_DELAY_S, count: int = 1) -> None:
+    admin.post("/_admin/faults", json={"kind": kind, "operation": operation,
+                                       "delay_s": delay_s, "count": count}).raise_for_status()
