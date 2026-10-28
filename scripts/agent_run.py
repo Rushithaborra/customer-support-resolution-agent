@@ -1,7 +1,7 @@
 """Run the agent workflow on a real ticket with the real API and print the route and trace.
 
 Needs: Postgres seeded, mocks running (uv run uvicorn mocks.main:app --port 8001),
-and ANTHROPIC_API_KEY in .env.
+and an LLM: ANTHROPIC_API_KEY in .env, or LLM_PROVIDER=ollama.
 
 Run:  uv run python -m scripts.agent_run <ticket_id>
       uv run python -m scripts.agent_run --new "I returned my headphones, no refund yet" --order ord_1001
@@ -17,7 +17,7 @@ from app.db.models import Customer, Ticket
 from app.db.session import SessionLocal
 from app.integrations.http import ServiceClient
 from app.integrations.shipping import ShippingClient
-from app.llm.anthropic_client import AnthropicLLM
+from app.llm.deps import build_llm, describe_llm
 
 
 def main() -> None:
@@ -39,7 +39,8 @@ def main() -> None:
         if not ticket_id:
             raise SystemExit("give a ticket id or --new")
 
-        run = run_agent(db, AnthropicLLM(), ShippingClient(http), ticket_id, actor="script")
+        print(f"model: {describe_llm()}")
+        run = run_agent(db, build_llm(), ShippingClient(http), ticket_id, actor="script")
         o = run.outcome or {}
         print(f"ticket {ticket_id}  run {run.id}  status {run.status}")
         print(f"ROUTE: {run.route} ({run.route_reason})   model suggested: {o.get('model_suggestion')}"

@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     http_connect_timeout_s: float = 2.0
     http_read_timeout_s: float = 5.0
 
+    # Which model backend: "anthropic" (paid API) or "ollama" (free, local).
+    llm_provider: Literal["anthropic", "ollama"] = "anthropic"
+
+    # Ollama (local). qwen2.5:7b handles tool calls and JSON output well for its size.
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_num_ctx: int = 16384
+    ollama_timeout_s: float = 180.0  # local generation on a laptop is slow
+
     # LLM (Anthropic). The key is read here and passed to the SDK explicitly,
     # because pydantic-settings loads .env into Settings, not into os.environ.
     anthropic_api_key: str | None = None
