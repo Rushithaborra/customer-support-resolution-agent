@@ -2,84 +2,40 @@
 
 ## 2026-10-28
 
-Finished the free local model setup and built Part 10 (async runs).
+Today the project went from "works when everything goes right" to finished, measured and presentable: the free local model, then Parts 10 to 14 of the roadmap, 31 commits. All 14 roadmap parts are done, and 479 tests pass.
 
-**Local model.** The `qwen2.5:7b` download had stopped before finishing, so it was restarted in the background. The
-Ollama adapter code is done and tested. The live run on the local model waits for the download.
+**Local model.** The `qwen2.5:7b` download had stalled; it was restarted and finished. On the 9 live tests the local model passed 7. The two misses were escalations to a human, never a wrong action. Each agent run takes about a minute on the laptop.
 
-**Part 10.** Agent runs no longer happen inside the web request:
-- Starting a run, or approving a refund, now records the work as a job in a Postgres table and returns `202 Accepted`
-  straight away.
-- A separate worker process (`scripts.worker`) picks jobs up with `SELECT … FOR UPDATE SKIP LOCKED`, so several
-  workers never grab the same job.
-- Each job carries a time-limited lease. If a worker dies, its lease runs out and another worker takes the job over,
-  continuing from the run's last LangGraph checkpoint instead of starting again.
-- Failures retry with backoff. After 3 attempts a job is dead-lettered and its ticket goes to a human.
-- The worker also runs the proposal-expiry sweep every 5 minutes.
-- A new `/events` endpoint shows each run's timeline.
+**Parts 10 and 11: surviving failure.** Agent runs moved out of the web request. Starting a run or approving a refund now saves a job and returns `202 Accepted` straight away, and a separate worker process does the work (Part 10):
+- Jobs live in a Postgres queue that workers claim with `SELECT … FOR UPDATE SKIP LOCKED`, so two workers never take the same job.
+- Each job has a time-limited lease. If a worker dies, another one takes over and continues from the run's last saved step.
+- Failed jobs retry with backoff and, after 3 attempts, go to a human.
 
-**Verified with real processes.** A worker was `kill -9`'d halfway through a run. A second worker took over without
-repeating finished steps. After approval, exactly one refund went through. A test also kills the worker right after
-the payment provider accepted a refund: the next worker reconciles it by idempotency key, and the provider still has
-one refund. **275 tests pass.**
+Refunds whose outcome is unknown (a timeout, a lost response, a crash) are now settled automatically: a sweep asks the payment provider using the refund's idempotency key. If the provider never answers, the refund is parked for a human; it is never marked "failed" (Part 11). Tests inject a fault at 8 different points, and every one ends with exactly one refund. Both parts were also checked live with real processes, including killing a worker in the middle of a run.
 
-**Part 11 (refund safety).** When a refund call ends without a clear answer (a timeout, a lost response, a crashed
-worker), the money may or may not have moved. Until now, only a staff member clicking "refresh" would find out.
-- **Automatic sweep.** Every 60 s the worker asks the payment provider about any refund still in that state, using
-  the refund's idempotency key. It waits a 60 s grace period first and backs off between attempts.
-- **Never guesses.** If the provider has the refund, the real status is recorded. If not, it resends with the same
-  key, so a delayed original can't become a second refund.
-- **Hands hard cases to a person.** If the provider never answers, or its record disagrees with ours, the refund is
-  parked for a human. It stays "unknown", never "failed".
-- **Proved.** A test matrix injects a fault at eight different points, and every case ends with exactly one refund.
-  Real-thread race tests (parallel executes, two proposals for one order, the sweep racing a slow send) also give one
-  refund each.
-- **Checked live.** The provider's response was lost on purpose. The customer saw "confirming", and two minutes later
-  the sweep settled it with no human involved. **291 tests pass**, and the suite now has zero warnings.
+**Part 12: a UI.** A plain HTML + JavaScript UI is served by the API:
+- A customer panel where the customer submits a request and watches its status.
+- A staff/reviewer console with a live timeline of every agent step, an evidence panel, an approval queue, and buttons that make the payment provider fail on purpose.
+- A deterministic "demo" model (keyword rules, labelled "not an AI") makes Demos A, B and C repeat exactly.
 
-**Part 12 (frontend).** The project now has a browser UI at `/ui`, plain HTML + JavaScript served by the API with no
-build step:
-- **Customer panel:** Asha picks an order, writes a message, and watches her request's status. The wording always
-  comes from the backend's confirmed state.
-- **Staff/reviewer console:** a ticket queue and an approval queue, a live workflow timeline (every agent step, tool
-  call, pause, worker takeover and refund state), an evidence panel, and a proposal card where only a reviewer can
-  approve. Demo buttons make the mock payment provider fail on purpose.
-- **Demo model.** With no paid key and a slow local model, a deterministic "demo" model (keyword rules, clearly
-  labelled "not an AI") makes the three demos repeat exactly: A (refund end to end), B (cases where it must not
-  refund) and C (lost provider response, recovered automatically).
-- **Two bugs found and fixed:**
-  - Picking the order from the dropdown without typing its id used to escalate the ticket.
-  - The internal HTTP client crashed on empty "204" replies.
-- **Verified.** All three demos ran against the real API, worker and mocks. **319 tests pass.**
+Building it exposed two real bugs, both fixed: picking an order from the dropdown used to escalate the ticket, and the HTTP client crashed on empty replies.
 
-**Part 13 (evaluation).** The agent is now measured, not just tested:
-- **The suite.** 60 synthetic cases: 40 for tuning, 20 held back. Each brings its own order data and runs through the
-  real agent in a transaction that is rolled back afterwards. Scoring compares against what the system stored, with
-  no AI judge.
-- **Label check.** Every case is also run with a "perfect model". If code wouldn't reach a label even then, the label
-  is wrong and a test fails.
-- **Specialist mode.** A separate investigator for refunds, delivery and damage, each with its own prompt and only the
-  tools it needs. It is compared against the single agent on the same cases.
-- **Results on the local `qwen2.5:7b` model (about 4.5 hours of runs):**
-  - The single agent routes 70% of held-out cases correctly; specialists route 85%, using 18% fewer tokens.
-  - In both modes there were **zero unsafe refund proposals and zero data leaks**, injection cases included.
-  - Every miss was a hand-off to a human. The most common one was the model inventing a refund amount (for example
-    12990 paise instead of 249900), which code rejected every time.
-- **460 tests pass.**
+**Part 13: measurement.** An eval suite of 60 synthetic cases (40 dev, 20 held-out) runs through the real agent and is scored from stored results, with no AI judge. A "perfect model" check confirms every label. On the local model, the single agent routed 70% of held-out cases correctly, and a new specialist mode (separate investigators for refunds, delivery and damage) routed 85% with 18% fewer tokens. There were **zero unsafe refund proposals and zero data leaks in all 120 runs**, prompt-injection cases included. The most common miss was the model inventing a refund amount (for example 12990 paise instead of 249900), which code rejected every time.
 
-**Part 14 (presentation).** The repo now tells its story to someone with two minutes:
-- **README rewrite.** It opens with a table pairing each claim with the test that proves it, then an architecture
-  diagram, the eval results (with the synthetic-data warning), a quickstart and a repo map.
-- **`docs/architecture.md`.** Diagrams of the components, one refund end to end, and the refund state machine, plus a
-  table showing where each of the 10 design rules is enforced in code and which test checks it.
-- **Demo kit and résumé.** A 3-minute recording script and a one-command reset (`scripts.reset_demo`) are ready;
-  the recording itself still has to be made. Résumé bullets and a pitch use only verified numbers.
-- **MIT license.**
-- **Reproduced from scratch.** Starting from a clean copy and a brand-new database and following the README exactly:
-  478 tests passed and the eval numbers came out identical.
-- **Docs test.** A new test keeps the README's numbers and links from going stale.
+**Part 14: presentation.** Several pieces went in:
+- A reviewer-first README that links every claim to the test proving it.
+- `docs/architecture.md`, with diagrams and a table of where each design rule is enforced.
+- A 3-minute demo recording script with a one-command reset.
+- Résumé bullets and an MIT license.
+- A docs test that keeps the README's numbers and links from going stale.
 
-All 14 roadmap parts are done.
+Following the README from a clean copy and a brand-new database gave 478 passing tests and identical eval numbers.
+
+**Next (tomorrow):**
+- Check that the README diagrams render on GitHub.
+- Record the demo and link it in the README.
+- Fix the stale `docs/project-guide.md` reference in `CLAUDE.md`.
+- Possibly stop asking the model for the refund amount, since code already sets it.
 
 ## 2026-10-27
 
