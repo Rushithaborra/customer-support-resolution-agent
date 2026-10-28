@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ActionProposal, AuditEvent, Customer, RefundOperation, Ticket, WorkflowRun
 from app.domain.customer_messages import customer_outcome
+from app.schemas import OutcomeOut
 from app.services.errors import NotFound
 from app.services.orders import get_owned_order
 
@@ -32,7 +33,7 @@ def with_outcome(db: Session, ticket: Ticket, model: type[M]) -> M:
     outcome = customer_outcome(ticket.status, refund.status if refund else None,
                                refund.amount_minor if refund else None)
     out = model.model_validate(ticket)
-    out.outcome = None if outcome is None else {"state": outcome.state, "message": outcome.message}
+    out.outcome = None if outcome is None else OutcomeOut(state=outcome.state, message=outcome.message)
     return out
 
 
