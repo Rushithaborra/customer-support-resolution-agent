@@ -185,15 +185,17 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 11. Refund safety | Reservation with `SELECT ... FOR UPDATE`, idempotent execution, reconciliation | Timeout, restart and concurrent tests produce zero duplicate refunds | Done |
 | 12. Frontend | Customer panel, workflow timeline, evidence panel, approval queue, outcome panel | Demos A, B and C run in the UI | Done |
 | 13. Evaluation | 60 synthetic cases, held-out set, metrics, single vs specialist comparison | Report is reproducible from one command | Done |
-| 14. Presentation | README, architecture diagram, demo recording, résumé entry | Another developer reproduces reported results | Not started |
+| 14. Presentation | README, architecture diagram, demo recording, résumé entry | Another developer reproduces reported results | Done (recording: script ready, to record) |
 
 ## Open decisions and risks
 
-One decision blocks Part 5: which LLM provider to use. It sets the tool-calling code, the embedding vector size and the cost per eval run.
+All open decisions are now made; each line records what was chosen and in which part.
 
 ### Open decisions
 
-- [x] LLM provider: Anthropic (`anthropic` SDK), default `claude-opus-5-5` at effort `medium`, set via `LLM_MODEL` — decided for Part 5
+- [x] LLM provider: provider-neutral `LLM` interface (Part 5). Anthropic (`claude-opus-5-5`, effort `medium`) by
+  default, plus free local Ollama (`qwen2.5:7b`, used for the Part 13 numbers) and a deterministic `demo` stand-in
+  for UI demos, selected with `LLM_PROVIDER`
 - [x] Embedding model: `BAAI/bge-small-en-v1.5` (384 dims, local via fastembed), similarity cutoff 0.70 —
   decided for Part 8. pgvector 0.8.1 built from source for Homebrew PG16. Voyage is the Part 13 comparison.
 - [x] Frontend stack: plain HTML + JS served by FastAPI at `/ui` (no build step), with an

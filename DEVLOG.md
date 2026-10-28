@@ -67,6 +67,20 @@ build step:
     12990 paise instead of 249900), which code rejected every time.
 - **460 tests pass.**
 
+**Part 14 (presentation).** The repo now tells its story to someone with two minutes:
+- **README rewrite.** It opens with a table pairing each claim with the test that proves it, then an architecture
+  diagram, the eval results (with the synthetic-data warning), a quickstart and a repo map.
+- **`docs/architecture.md`.** Diagrams of the components, one refund end to end, and the refund state machine, plus a
+  table showing where each of the 10 design rules is enforced in code and which test checks it.
+- **Demo kit and résumé.** A 3-minute recording script and a one-command reset (`scripts.reset_demo`) are ready;
+  the recording itself still has to be made. Résumé bullets and a pitch use only verified numbers.
+- **MIT license.**
+- **Reproduced from scratch.** Starting from a clean copy and a brand-new database and following the README exactly:
+  478 tests passed and the eval numbers came out identical.
+- **Docs test.** A new test keeps the README's numbers and links from going stale.
+
+All 14 roadmap parts are done.
+
 ## 2026-10-27
 
 Today the project went from an empty repo to a working, human-approved refund agent: Parts 1 to 9 of the roadmap, 33 commits.
