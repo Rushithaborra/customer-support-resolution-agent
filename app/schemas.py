@@ -113,6 +113,16 @@ class CloseIn(BaseModel):
     summary: str = Field(min_length=1, max_length=2000)
 
 
+class JobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    status: str
+    attempts: int
+    last_error: str | None
+
+
 class AgentRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -122,6 +132,18 @@ class AgentRunOut(BaseModel):
     route: str | None
     route_reason: str | None
     outcome: dict | None
+    job: JobOut | None = None  # the latest background job working on this run
+
+
+class RunEventOut(BaseModel):
+    """One timeline entry. Payloads are already redacted (ids, node names, codes; no customer text)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    actor: str
+    event_type: str
+    redacted_payload: dict
+    created_at: datetime
 
 
 class RefundOperationOut(BaseModel):
@@ -137,12 +159,13 @@ class RefundOperationOut(BaseModel):
 
 
 class DecisionOut(BaseModel):
-    """What a reviewer's decision led to: the proposal, the approval (if approved),
-    the agent run's status after resuming, and the refund if one was executed."""
+    """The stored decision. For an agent proposal the paused workflow resumes in the
+    background (resume_job_id); poll the run or the refund to see what it led to."""
     proposal: ProposalOut
     approval: ApprovalOut | None
     run_status: str | None
     refund: RefundOperationOut | None
+    resume_job_id: str | None = None
 
 
 class ExpiryOut(BaseModel):

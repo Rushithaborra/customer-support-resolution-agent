@@ -4,12 +4,12 @@ deciding a proposal needs a reviewer token, and never the proposal's creator."""
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
-from app.agent.checkpoint import get_checkpointer
-from app.agent.resume import resume_for_proposal, resume_superseded
+from app.agent.resume import request_resume, request_resume_superseded
 from app.auth import Staff, get_current_reviewer, get_current_staff
+from app.db.models import WorkflowRun
 from app.db.session import get_db
 from app.integrations.deps import get_payment_client, get_shipping_client
 from app.integrations.payment import PaymentClient
@@ -46,11 +46,11 @@ def assess(ticket_id: str, _: Staff = Depends(get_current_staff), db: Session = 
 
 @router.post("/tickets/{ticket_id}/proposals", response_model=ProposalOut, status_code=201)
 def propose(ticket_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
-            embedder: Embedder = Depends(get_embedder), checkpointer=Depends(get_checkpointer),
-            payment: PaymentClient = Depends(get_payment_client)):
+            embedder: Embedder = Depends(get_embedder)):
     proposal = resolution.propose_refund(db, staff, ticket_id, embedder)
-    # Any agent proposal this one superseded: let its paused workflow finish as "invalidated".
-    resume_superseded(db, ticket_id, checkpointer=checkpointer, payment=payment)
+    # Any agent proposal this one superseded: its paused workflow finishes as "invalidated" (worker).
+    request_resume_superseded(db, ticket_id)
+    db.commit()
     return proposal
 
 
@@ -74,38 +74,42 @@ def get_proposal(proposal_id: str, _: Staff = Depends(get_current_staff), db: Se
     return resolution.get_proposal(db, proposal_id)
 
 
-def _decision(db: Session, proposal_id: str, approval=None, run=None) -> dict:
-    return {"proposal": resolution.get_proposal(db, proposal_id),
-            "approval": approval,
-            "run_status": run.status if run else None,
-            "refund": refunds.operation_for(db, proposal_id)}
+def _decided(db: Session, response: Response, proposal_id: str, signal: str, approval=None) -> dict:
+    """Queue the resume of a paused agent workflow. 202 when work was handed to the worker
+    (the refund isn't done yet); 200 for a manual proposal, where the decision is everything."""
+    job = request_resume(db, proposal_id, signal)
+    db.commit()
+    response.status_code = 202 if job else 200
+    proposal = resolution.get_proposal(db, proposal_id)
+    run_status = db.get(WorkflowRun, proposal.run_id).status if job else None  # agent workflows only
+    return {"proposal": proposal, "approval": approval, "run_status": run_status,
+            "refund": refunds.operation_for(db, proposal_id), "resume_job_id": job.id if job else None}
 
 
 @router.post("/proposals/{proposal_id}/approve", response_model=DecisionOut)
-def approve(proposal_id: str, body: ApproveIn, reviewer: Staff = Depends(get_current_reviewer),
-            db: Session = Depends(get_db), checkpointer=Depends(get_checkpointer),
-            payment: PaymentClient = Depends(get_payment_client)):
-    """Store the approval, then resume the paused agent workflow (if any), which executes the refund."""
+def approve(proposal_id: str, body: ApproveIn, response: Response, reviewer: Staff = Depends(get_current_reviewer),
+            db: Session = Depends(get_db)):
+    """Store the approval. A paused agent workflow then resumes in the worker and executes the
+    refund, so the provider is never called while this request is open."""
     approval = approvals.approve(db, reviewer, proposal_id, body.payload_hash, _now())
-    run = resume_for_proposal(db, proposal_id, "approved", checkpointer=checkpointer, payment=payment)
-    return _decision(db, proposal_id, approval, run)
+    return _decided(db, response, proposal_id, "approved", approval)
 
 
 @router.post("/proposals/{proposal_id}/reject", response_model=DecisionOut)
-def reject(proposal_id: str, reviewer: Staff = Depends(get_current_reviewer), db: Session = Depends(get_db),
-           checkpointer=Depends(get_checkpointer), payment: PaymentClient = Depends(get_payment_client)):
+def reject(proposal_id: str, response: Response, reviewer: Staff = Depends(get_current_reviewer),
+           db: Session = Depends(get_db)):
     approvals.reject(db, reviewer, proposal_id, _now())
-    run = resume_for_proposal(db, proposal_id, "rejected", checkpointer=checkpointer, payment=payment)
-    return _decision(db, proposal_id, None, run)
+    return _decided(db, response, proposal_id, "rejected")
 
 
 @router.post("/maintenance/expire-proposals", response_model=ExpiryOut)
-def expire_proposals(_: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
-                     checkpointer=Depends(get_checkpointer), payment: PaymentClient = Depends(get_payment_client)):
-    """Expire stale proposals and finish their paused workflows. Part 10's worker runs this on a schedule."""
+def expire_proposals(_: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
+    """Expire stale proposals now (DB only) and queue the resumes of their paused workflows.
+    The worker also runs this sweep every few minutes."""
     expired = approvals.expire_stale(db, _now())
     for pid in expired:
-        resume_for_proposal(db, pid, "expired", checkpointer=checkpointer, payment=payment)
+        request_resume(db, pid, "expired")
+    db.commit()
     return {"expired": expired}
 
 
