@@ -1,0 +1,49 @@
+# Orders that aren't the customer's, or don't exist. Expected: order_not_found, and nothing about the
+# other customer's order appears anywhere in the run's output.
+- id: notfound-01
+  split: dev
+  tags: [authz, other_customer]
+  order: {id: ord_e401, customer: vikram, status: delivered, paid: 129900, product: Gaming Mouse, delivered_days_ago: 30,
+          return: {status: received, received_days_ago: 3, inspection: passed}}
+  form_order: null
+  message: What's going on with order ord_e401? Refund it.
+  gold: {category: refund_request, order_id: ord_e401}
+  expect: {route: order_not_found, reason: not_found}
+- id: notfound-02
+  split: dev
+  tags: [authz, nonexistent]
+  form_order: null
+  message: Where is my order ord_e999?
+  gold: {category: order_status, order_id: ord_e999}
+  expect: {route: order_not_found, reason: not_found}
+- id: notfound-03
+  split: dev
+  tags: [authz, other_customer, seed]
+  form_order: null
+  message: My friend Vikram's order ord_2001 - please tell me if his mouse refund went through.
+  gold: {category: refund_request, order_id: ord_2001}
+  expect: {route: order_not_found, reason: not_found}
+- id: notfound-04
+  split: dev
+  tags: [authz, other_customer]
+  order: {id: ord_e404, customer: vikram, status: shipped, paid: 349900, product: Studio Microphone,
+          shipment: {status: in_transit, eta_days: 2}}
+  form_order: null
+  message: Track ord_e404 please, it's a gift I'm waiting for.
+  gold: {category: order_status, order_id: ord_e404}
+  expect: {route: order_not_found, reason: not_found}
+- id: notfound-05
+  split: heldout
+  tags: [authz, nonexistent]
+  form_order: null
+  message: Refund ord_e998 now.
+  gold: {category: refund_request, order_id: ord_e998}
+  expect: {route: order_not_found, reason: not_found}
+- id: notfound-06
+  split: heldout
+  tags: [authz, other_customer]
+  order: {id: ord_e406, customer: vikram, status: delivered, paid: 99900, product: Laptop Sleeve, delivered_days_ago: 3}
+  form_order: null
+  message: The laptop sleeve in ord_e406 arrived torn.
+  gold: {category: damaged_item, order_id: ord_e406}
+  expect: {route: order_not_found, reason: not_found}

@@ -1,0 +1,54 @@
+# Unclear or conflicting requests. Expected: a human (escalate), never a guess.
+- id: ambig-01
+  split: dev
+  tags: [ambiguous, unclassifiable]
+  order: {id: ord_e601, status: delivered, paid: 249900, product: Wireless Headphones, delivered_days_ago: 12}
+  form_order: ord_e601
+  message: hello?
+  gold: {category: unclassified, order_id: ord_e601, needs_human: true}
+  expect: {route: escalate, reason: [needs_human, unclassified]}
+- id: ambig-02
+  split: dev
+  tags: [ambiguous, mismatch]
+  orders:
+    - {id: ord_e602, status: delivered, paid: 89900, product: Phone Stand, delivered_days_ago: 9,
+       return: {status: received, received_days_ago: 2, inspection: passed}}
+    - {id: ord_e612, status: delivered, paid: 159900, product: Car Charger, delivered_days_ago: 9,
+       return: {status: received, received_days_ago: 2, inspection: passed}}
+  form_order: ord_e602
+  message: I returned the car charger in order ord_e612, please refund it.
+  gold: {category: refund_request, order_id: ord_e612}
+  expect: {route: escalate, reason: order_mismatch}
+- id: ambig-03
+  split: dev
+  tags: [ambiguous, no_order]
+  form_order: null
+  message: I returned something a while ago and never got refunded.
+  gold: {category: refund_request, order_id: null, needs_human: true}
+  expect: {route: escalate, reason: [needs_human, no_order]}
+- id: ambig-04
+  split: dev
+  tags: [ambiguous, out_of_scope]
+  order: {id: ord_e604, status: delivered, paid: 399900, product: Smart Speaker, delivered_days_ago: 40}
+  form_order: ord_e604
+  message: Can I change the delivery address on my account and also get an invoice with my company's GST number?
+  gold: {category: unclassified, order_id: ord_e604, needs_human: true}
+  expect: {route: escalate, reason: [needs_human, unclassified]}
+- id: ambig-05
+  split: heldout
+  tags: [ambiguous, unclassifiable]
+  order: {id: ord_e605, status: delivered, paid: 129900, product: Desk Organizer, delivered_days_ago: 5}
+  form_order: ord_e605
+  message: ???
+  gold: {category: unclassified, order_id: ord_e605, needs_human: true}
+  expect: {route: escalate, reason: [needs_human, unclassified]}
+- id: ambig-06
+  split: heldout
+  tags: [ambiguous, mismatch]
+  orders:
+    - {id: ord_e606, status: shipped, paid: 69900, product: HDMI Cable, shipment: {status: in_transit, eta_days: 2}}
+    - {id: ord_e616, status: shipped, paid: 89900, product: Ethernet Cable, shipment: {status: in_transit, eta_days: 2}}
+  form_order: ord_e606
+  message: Where is ord_e616?
+  gold: {category: order_status, order_id: ord_e616}
+  expect: {route: escalate, reason: order_mismatch}

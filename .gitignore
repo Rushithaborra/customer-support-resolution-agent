@@ -3,3 +3,6 @@ __pycache__/
 .env
 .pytest_cache/
 .DS_Store
+
+# eval progress logs (results themselves are committed)
+evals/runs/*.log

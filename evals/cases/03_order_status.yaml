@@ -1,0 +1,73 @@
+# "Where is my order?" Expected: report the carrier status (no refund, no escalation).
+- id: status-01
+  split: dev
+  tags: [status]
+  order: {id: ord_e201, status: shipped, paid: 159900, product: Bluetooth Speaker,
+          shipment: {status: in_transit, eta_days: 2}}
+  form_order: ord_e201
+  message: Where is my speaker? It hasn't arrived.
+  gold: {category: order_status, order_id: ord_e201}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-02
+  split: dev
+  tags: [status, id_in_text]
+  order: {id: ord_e202, status: shipped, paid: 89900, product: Keyboard Cover,
+          shipment: {status: out_for_delivery, eta_days: 0}}
+  form_order: null
+  message: Can you track ord_e202 for me?
+  gold: {category: order_status, order_id: ord_e202}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-03
+  split: dev
+  tags: [status, informal]
+  order: {id: ord_e203, status: placed, paid: 249900, product: Smart Bulb Pack,
+          shipment: {status: label_created, eta_days: 5}}
+  form_order: ord_e203
+  message: still not shipped?? when will it come
+  gold: {category: order_status, order_id: ord_e203}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-04
+  split: dev
+  tags: [status, hinglish]
+  order: {id: ord_e204, status: shipped, paid: 349900, product: Air Purifier,
+          shipment: {status: in_transit, eta_days: 3}}
+  form_order: ord_e204
+  message: Mera order kab tak deliver hoga?
+  gold: {category: order_status, order_id: ord_e204}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-05
+  split: dev
+  tags: [status, delivered_but_missing]
+  order: {id: ord_e205, status: delivered, paid: 119900, product: Wireless Charger, delivered_days_ago: 1,
+          shipment: {status: delivered, delivered_days_ago: 1}}
+  form_order: ord_e205
+  message: Tracking says delivered but I can't find the package. Where is it?
+  gold: {category: order_status, order_id: ord_e205}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-06
+  split: heldout
+  tags: [status]
+  order: {id: ord_e206, status: shipped, paid: 499900, product: Monitor Arm,
+          shipment: {status: in_transit, eta_days: 1}}
+  form_order: ord_e206
+  message: Any update on the delivery of my monitor arm?
+  gold: {category: order_status, order_id: ord_e206}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-07
+  split: heldout
+  tags: [status, lost]
+  order: {id: ord_e207, status: shipped, paid: 279900, product: Graphics Tablet,
+          shipment: {status: lost}}
+  form_order: ord_e207
+  message: It's been two weeks and my tablet still hasn't arrived. What's going on with the shipment?
+  gold: {category: order_status, order_id: ord_e207}
+  expect: {route: report_order_status, reason: order_status}
+- id: status-08
+  split: heldout
+  tags: [status, id_in_text, typos]
+  order: {id: ord_e208, status: shipped, paid: 69900, product: HDMI Cable,
+          shipment: {status: in_transit, eta_days: 2}}
+  form_order: null
+  message: wher is my ordr ord_e208
+  gold: {category: order_status, order_id: ord_e208}
+  expect: {route: report_order_status, reason: order_status}

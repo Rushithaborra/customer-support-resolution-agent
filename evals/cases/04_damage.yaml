@@ -1,0 +1,67 @@
+# Damage claims. In the 7-day window a human always reviews (escalate); outside it, explain the policy.
+- id: damage-01
+  split: dev
+  tags: [damage, in_window]
+  order: {id: ord_e301, status: delivered, paid: 349900, product: 24-inch Monitor, delivered_days_ago: 2}
+  form_order: ord_e301
+  message: My monitor arrived with a cracked screen.
+  gold: {category: damaged_item, order_id: ord_e301}
+  expect: {route: escalate, reason: damage_report_in_window}
+- id: damage-02
+  split: dev
+  tags: [damage, in_window, informal]
+  order: {id: ord_e302, status: delivered, paid: 89900, product: Ceramic Mug Warmer, delivered_days_ago: 1}
+  form_order: ord_e302
+  message: box was crushed and the warmer is broken
+  gold: {category: damaged_item, order_id: ord_e302}
+  expect: {route: escalate, reason: damage_report_in_window}
+- id: damage-03
+  split: dev
+  tags: [damage, outside_window]
+  order: {id: ord_e303, status: delivered, paid: 199900, product: Smart Watch, delivered_days_ago: 20}
+  form_order: ord_e303
+  message: The watch screen is cracked, it came like that.
+  gold: {category: damaged_item, order_id: ord_e303}
+  expect: {route: explain_policy, reason: outside_damage_window}
+- id: damage-04
+  split: dev
+  tags: [damage, in_window, hinglish]
+  order: {id: ord_e304, status: delivered, paid: 459900, product: Printer, delivered_days_ago: 3}
+  form_order: ord_e304
+  message: Printer toota hua aaya hai, side panel damaged hai.
+  gold: {category: damaged_item, order_id: ord_e304}
+  expect: {route: escalate, reason: damage_report_in_window}
+- id: damage-05
+  split: dev
+  tags: [damage, not_delivered]
+  order: {id: ord_e305, status: shipped, paid: 129900, product: Glass Kettle,
+          shipment: {status: in_transit, eta_days: 1}}
+  form_order: ord_e305
+  message: I think my kettle will arrive broken, the courier dropped it.
+  gold: {category: damaged_item, order_id: ord_e305}
+  # not_delivered has no policy query -> a human decides.
+  expect: {route: escalate, reason: no_policy_found}
+- id: damage-06
+  split: heldout
+  tags: [damage, in_window]
+  order: {id: ord_e306, status: delivered, paid: 899900, product: Soundbar, delivered_days_ago: 4}
+  form_order: ord_e306
+  message: The soundbar arrived damaged - there's a big dent and it won't turn on.
+  gold: {category: damaged_item, order_id: ord_e306}
+  expect: {route: escalate, reason: damage_report_in_window}
+- id: damage-07
+  split: heldout
+  tags: [damage, outside_window]
+  order: {id: ord_e307, status: delivered, paid: 149900, product: Desk Fan, delivered_days_ago: 15}
+  form_order: ord_e307
+  message: Fan blade was broken when I opened the box.
+  gold: {category: damaged_item, order_id: ord_e307}
+  expect: {route: explain_policy, reason: outside_damage_window}
+- id: damage-08
+  split: heldout
+  tags: [damage, in_window, defect]
+  order: {id: ord_e308, status: delivered, paid: 279900, product: Electric Toothbrush, delivered_days_ago: 2}
+  form_order: ord_e308
+  message: The toothbrush is defective out of the box, the handle is cracked.
+  gold: {category: damaged_item, order_id: ord_e308}
+  expect: {route: escalate, reason: damage_report_in_window}

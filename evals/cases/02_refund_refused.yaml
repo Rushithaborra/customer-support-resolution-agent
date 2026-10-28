@@ -1,0 +1,126 @@
+# Refunds the rules refuse. Expected: explain the policy with the rule's reason code, never a proposal.
+- id: refuse-01
+  split: dev
+  tags: [refund, refused, return_not_received]
+  order: {id: ord_e101, status: delivered, paid: 89900, product: Mechanical Keyboard, delivered_days_ago: 6,
+          return: {status: in_transit}}
+  form_order: ord_e101
+  message: I sent the keyboard back, please refund me.
+  gold: {category: refund_request, order_id: ord_e101}
+  expect: {route: explain_policy, reason: return_not_received}
+- id: refuse-02
+  split: dev
+  tags: [refund, refused, return_not_received]
+  order: {id: ord_e102, status: delivered, paid: 149900, product: Bluetooth Speaker, delivered_days_ago: 5,
+          return: {status: requested}}
+  form_order: ord_e102
+  message: I asked for a return yesterday, can you refund me already?
+  gold: {category: refund_request, order_id: ord_e102}
+  expect: {route: explain_policy, reason: return_not_received}
+- id: refuse-03
+  split: dev
+  tags: [refund, refused, inspection_pending]
+  order: {id: ord_e103, status: delivered, paid: 299900, product: Gaming Headset, delivered_days_ago: 11,
+          return: {status: received, received_days_ago: 1, inspection: pending}}
+  form_order: ord_e103
+  message: You received my headset return yesterday. Where is the refund?
+  gold: {category: refund_request, order_id: ord_e103}
+  expect: {route: explain_policy, reason: inspection_pending}
+- id: refuse-04
+  split: dev
+  tags: [refund, refused, inspection_failed]
+  order: {id: ord_e104, status: delivered, paid: 129900, product: Gaming Mouse, delivered_days_ago: 30,
+          return: {status: received, received_days_ago: 5, inspection: failed}}
+  form_order: ord_e104
+  message: I returned the gaming mouse, where's my money?
+  gold: {category: refund_request, order_id: ord_e104}
+  expect: {route: explain_policy, reason: inspection_failed}
+- id: refuse-05
+  split: dev
+  tags: [refund, refused, outside_return_window]
+  order: {id: ord_e105, status: delivered, paid: 549900, product: Tablet, delivered_days_ago: 50,
+          return: {status: received, received_days_ago: 3, inspection: passed}}
+  form_order: ord_e105
+  message: I finally sent the tablet back, please refund it.
+  gold: {category: refund_request, order_id: ord_e105}
+  expect: {route: explain_policy, reason: outside_return_window}
+- id: refuse-06
+  split: dev
+  tags: [refund, refused, no_return]
+  order: {id: ord_e106, status: delivered, paid: 99900, product: Phone Case, delivered_days_ago: 7}
+  form_order: ord_e106
+  message: I don't like the phone case, just refund me.
+  gold: {category: refund_request, order_id: ord_e106}
+  expect: {route: explain_policy, reason: no_return}
+- id: refuse-07
+  split: dev
+  tags: [refund, refused, not_delivered]
+  order: {id: ord_e107, status: shipped, paid: 399900, product: Smart Speaker,
+          shipment: {status: in_transit, eta_days: 2}}
+  form_order: ord_e107
+  message: I want a refund for the smart speaker.
+  gold: {category: refund_request, order_id: ord_e107}
+  # not_delivered has no policy query, so code escalates rather than invent a rule.
+  expect: {route: escalate, reason: no_policy_found}
+- id: refuse-08
+  split: dev
+  tags: [refund, refused, return_rejected]
+  order: {id: ord_e108, status: delivered, paid: 179900, product: Fitness Band, delivered_days_ago: 16,
+          return: {status: rejected}}
+  form_order: ord_e108
+  message: Why haven't I been refunded for the fitness band I wanted to return?
+  gold: {category: refund_request, order_id: ord_e108}
+  expect: {route: explain_policy, reason: return_rejected}
+- id: refuse-09
+  split: dev
+  tags: [refund, refused, inspection_failed, angry]
+  order: {id: ord_e109, status: delivered, paid: 649900, product: Drone, delivered_days_ago: 21,
+          return: {status: received, received_days_ago: 2, inspection: failed}}
+  form_order: ord_e109
+  message: The drone was fine when I sent it. I demand my refund today.
+  gold: {category: refund_request, order_id: ord_e109}
+  expect: {route: explain_policy, reason: inspection_failed}
+- id: refuse-10
+  split: heldout
+  tags: [refund, refused, return_not_received, hinglish]
+  order: {id: ord_e110, status: delivered, paid: 79900, product: Desk Lamp, delivered_days_ago: 4,
+          return: {status: in_transit}}
+  form_order: ord_e110
+  message: Lamp return kar diya hai courier se, refund de do.
+  gold: {category: refund_request, order_id: ord_e110}
+  expect: {route: explain_policy, reason: return_not_received}
+- id: refuse-11
+  split: heldout
+  tags: [refund, refused, inspection_pending]
+  order: {id: ord_e111, status: delivered, paid: 249900, product: Router, delivered_days_ago: 13,
+          return: {status: received, received_days_ago: 1, inspection: pending}}
+  form_order: ord_e111
+  message: The router should have reached you. Is my refund done?
+  gold: {category: refund_request, order_id: ord_e111}
+  expect: {route: explain_policy, reason: inspection_pending}
+- id: refuse-12
+  split: heldout
+  tags: [refund, refused, outside_return_window]
+  order: {id: ord_e112, status: delivered, paid: 1899900, product: Laptop, delivered_days_ago: 70,
+          return: {status: received, received_days_ago: 10, inspection: passed}}
+  form_order: ord_e112
+  message: I returned the laptop, please refund the full price.
+  gold: {category: refund_request, order_id: ord_e112}
+  expect: {route: explain_policy, reason: outside_return_window}
+- id: refuse-13
+  split: heldout
+  tags: [refund, refused, no_return]
+  order: {id: ord_e113, status: delivered, paid: 39900, product: Screen Protector, delivered_days_ago: 3}
+  form_order: ord_e113
+  message: Refund the screen protector please, I changed my mind.
+  gold: {category: refund_request, order_id: ord_e113}
+  expect: {route: explain_policy, reason: no_return}
+- id: refuse-14
+  split: heldout
+  tags: [refund, refused, inspection_failed]
+  order: {id: ord_e114, status: delivered, paid: 99900, product: Power Bank, delivered_days_ago: 19,
+          return: {status: received, received_days_ago: 4, inspection: failed}}
+  form_order: ord_e114
+  message: Power bank returned. Refund status?
+  gold: {category: refund_request, order_id: ord_e114}
+  expect: {route: explain_policy, reason: inspection_failed}

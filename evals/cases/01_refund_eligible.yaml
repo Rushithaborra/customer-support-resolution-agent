@@ -1,0 +1,95 @@
+# Eligible refunds: return received, inspection passed, inside the window.
+# Code decides the amount; the model must not change it. Expected: a proposal for the full paid amount.
+- id: elig-01
+  split: dev
+  tags: [refund, eligible]
+  order: {id: ord_e001, status: delivered, paid: 249900, product: Wireless Headphones, delivered_days_ago: 12,
+          return: {status: received, received_days_ago: 3, inspection: passed}}
+  form_order: ord_e001
+  message: I returned my headphones last week but haven't got my refund.
+  gold: {category: refund_request, order_id: ord_e001}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 249900}
+- id: elig-02
+  split: dev
+  tags: [refund, eligible, id_in_text]
+  order: {id: ord_e002, status: delivered, paid: 89900, product: Smart Watch Strap, delivered_days_ago: 20,
+          return: {status: received, received_days_ago: 2, inspection: passed}}
+  form_order: null
+  message: Hi, order ord_e002 - I sent the strap back and you received it. When do I get my money?
+  gold: {category: refund_request, order_id: ord_e002}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 89900}
+- id: elig-03
+  split: dev
+  tags: [refund, eligible, informal]
+  order: {id: ord_e003, status: delivered, paid: 1299900, product: Android Phone, delivered_days_ago: 15,
+          return: {status: received, received_days_ago: 4, inspection: passed}}
+  form_order: ord_e003
+  message: phone returned. refund pls
+  gold: {category: refund_request, order_id: ord_e003}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 1299900}
+- id: elig-04
+  split: dev
+  tags: [refund, eligible, hinglish]
+  order: {id: ord_e004, status: delivered, paid: 349900, product: Mechanical Keyboard, delivered_days_ago: 10,
+          return: {status: received, received_days_ago: 1, inspection: passed}}
+  form_order: ord_e004
+  message: Maine keyboard wapas bhej diya tha, abhi tak refund nahi aaya. Please check karo.
+  gold: {category: refund_request, order_id: ord_e004}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 349900}
+- id: elig-05
+  split: dev
+  tags: [refund, eligible, typos]
+  order: {id: ord_e005, status: delivered, paid: 59900, product: USB-C Charger, delivered_days_ago: 8,
+          return: {status: received, received_days_ago: 2, inspection: passed}}
+  form_order: ord_e005
+  message: i retuned the chargr, were is my refnd??
+  gold: {category: refund_request, order_id: ord_e005}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 59900}
+- id: elig-06
+  split: dev
+  tags: [refund, eligible, polite_long]
+  order: {id: ord_e006, status: delivered, paid: 799900, product: Noise Cancelling Earbuds, delivered_days_ago: 25,
+          return: {status: received, received_days_ago: 5, inspection: passed}}
+  form_order: ord_e006
+  message: >-
+    Good afternoon. I bought earbuds from you last month, but they did not fit well, so I returned them as
+    instructed. The courier confirmed delivery to your warehouse. Could you please let me know when the
+    refund will be processed? Thank you.
+  gold: {category: refund_request, order_id: ord_e006}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 799900}
+- id: elig-07
+  split: dev
+  tags: [refund, eligible, angry]
+  order: {id: ord_e007, status: delivered, paid: 199900, product: Webcam, delivered_days_ago: 18,
+          return: {status: received, received_days_ago: 6, inspection: passed}}
+  form_order: ord_e007
+  message: This is ridiculous. You got the webcam back almost a week ago. REFUND ME NOW.
+  gold: {category: refund_request, order_id: ord_e007}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 199900}
+- id: elig-08
+  split: heldout
+  tags: [refund, eligible]
+  order: {id: ord_e008, status: delivered, paid: 449900, product: Portable SSD, delivered_days_ago: 14,
+          return: {status: received, received_days_ago: 3, inspection: passed}}
+  form_order: ord_e008
+  message: My SSD return reached you. Please refund the amount to my card.
+  gold: {category: refund_request, order_id: ord_e008}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 449900}
+- id: elig-09
+  split: heldout
+  tags: [refund, eligible, id_in_text, hinglish]
+  order: {id: ord_e009, status: delivered, paid: 129900, product: Mouse Pad XL, delivered_days_ago: 9,
+          return: {status: received, received_days_ago: 1, inspection: passed}}
+  form_order: null
+  message: ord_e009 ka return ho gaya, paisa kab milega?
+  gold: {category: refund_request, order_id: ord_e009}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 129900}
+- id: elig-10
+  split: heldout
+  tags: [refund, eligible, money_back]
+  order: {id: ord_e010, status: delivered, paid: 2499900, product: 4K Television, delivered_days_ago: 22,
+          return: {status: received, received_days_ago: 4, inspection: passed}}
+  form_order: ord_e010
+  message: The TV went back with your pickup team. I'd like my money back please.
+  gold: {category: refund_request, order_id: ord_e010}
+  expect: {route: propose_refund, reason: eligible, amount_minor: 2499900}
