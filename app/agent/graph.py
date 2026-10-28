@@ -119,8 +119,14 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         return out
 
     def classify(state: AgentState) -> dict:
+        content = wrap_customer_message(state["message"])
+        if state.get("form_order_id"):
+            # Trusted context, outside the customer block: the order picked in the ticket form
+            # (ownership was checked when the ticket was created). Without it, a message that
+            # doesn't repeat the id can't be classified as order-specific.
+            content = f"Order selected in the ticket form: {state['form_order_id']}\n\n{content}"
         r = structured_call(llm, system=TRIAGE_SYSTEM, model=TicketTriage,
-                            messages=[{"role": "user", "content": wrap_customer_message(state["message"])}])
+                            messages=[{"role": "user", "content": content}])
         if not isinstance(r, Parsed):
             return {**_escalate(f"triage_failed:{r.reason}"), **_add_usage(state, r.usage, [])}
         return {"triage": r.value.model_dump(), **_add_usage(state, r.usage, [r.model])}

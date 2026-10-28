@@ -21,7 +21,8 @@ TRIAGE_SYSTEM = _SHARED + """
 Task: classify the customer's message.
 - category: order_status (where is my order), refund_request (refund for a returned item), \
 damaged_item (item arrived damaged), or unclassified.
-- order_id: only if the customer wrote one (format ord_ followed by letters/digits). Otherwise null.
+- order_id: the order the customer wrote (format ord_ followed by letters/digits), else the order \
+selected in the ticket form if one is given. Otherwise null.
 - needs_human: true if the request falls outside these categories or is ambiguous.
 """
 
