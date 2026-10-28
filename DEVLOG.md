@@ -37,6 +37,21 @@ worker), the money may or may not have moved. Until now, only a staff member cli
 - **Checked live.** The provider's response was lost on purpose. The customer saw "confirming", and two minutes later
   the sweep settled it with no human involved. **291 tests pass**, and the suite now has zero warnings.
 
+**Part 12 (frontend).** The project now has a browser UI at `/ui`, plain HTML + JavaScript served by the API with no
+build step:
+- **Customer panel:** Asha picks an order, writes a message, and watches her request's status. The wording always
+  comes from the backend's confirmed state.
+- **Staff/reviewer console:** a ticket queue and an approval queue, a live workflow timeline (every agent step, tool
+  call, pause, worker takeover and refund state), an evidence panel, and a proposal card where only a reviewer can
+  approve. Demo buttons make the mock payment provider fail on purpose.
+- **Demo model.** With no paid key and a slow local model, a deterministic "demo" model (keyword rules, clearly
+  labelled "not an AI") makes the three demos repeat exactly: A (refund end to end), B (cases where it must not
+  refund) and C (lost provider response, recovered automatically).
+- **Two bugs found and fixed:**
+  - Picking the order from the dropdown without typing its id used to escalate the ticket.
+  - The internal HTTP client crashed on empty "204" replies.
+- **Verified.** All three demos ran against the real API, worker and mocks. **319 tests pass.**
+
 ## 2026-10-27
 
 Today the project went from an empty repo to a working, human-approved refund agent: Parts 1 to 9 of the roadmap, 33 commits.
