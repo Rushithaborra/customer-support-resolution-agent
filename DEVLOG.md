@@ -23,6 +23,20 @@ repeating finished steps. After approval, exactly one refund went through. A tes
 the payment provider accepted a refund: the next worker reconciles it by idempotency key, and the provider still has
 one refund. **275 tests pass.**
 
+**Part 11 (refund safety).** When a refund call ends without a clear answer (a timeout, a lost response, a crashed
+worker), the money may or may not have moved. Until now, only a staff member clicking "refresh" would find out.
+- **Automatic sweep.** Every 60 s the worker asks the payment provider about any refund still in that state, using
+  the refund's idempotency key. It waits a 60 s grace period first and backs off between attempts.
+- **Never guesses.** If the provider has the refund, the real status is recorded. If not, it resends with the same
+  key, so a delayed original can't become a second refund.
+- **Hands hard cases to a person.** If the provider never answers, or its record disagrees with ours, the refund is
+  parked for a human. It stays "unknown", never "failed".
+- **Proved.** A test matrix injects a fault at eight different points, and every case ends with exactly one refund.
+  Real-thread race tests (parallel executes, two proposals for one order, the sweep racing a slow send) also give one
+  refund each.
+- **Checked live.** The provider's response was lost on purpose. The customer saw "confirming", and two minutes later
+  the sweep settled it with no human involved. **291 tests pass**, and the suite now has zero warnings.
+
 ## 2026-10-27
 
 Today the project went from an empty repo to a working, human-approved refund agent: Parts 1 to 9 of the roadmap, 33 commits.

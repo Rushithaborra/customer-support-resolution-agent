@@ -16,7 +16,10 @@ the workflow pauses with LangGraph `interrupt()` (checkpoints in Postgres), a se
 approves (never the proposer), stale proposals expire, and the run resumes into exactly-once
 execution, even after a restart. Part 10 makes runs async: requests return `202 Accepted` and a
 worker claims jobs from a Postgres queue (`FOR UPDATE SKIP LOCKED`, leases, retries); a run whose
-worker dies is taken over and continues from its last checkpoint. See `docs/project-overview.md`.
+worker dies is taken over and continues from its last checkpoint. Part 11 reconciles every
+refund whose outcome is unknown automatically (a sweep asks the provider by idempotency key, with
+backoff, and parks it for a human if it never gets an answer) and proves zero duplicate refunds
+across timeouts, crashes and concurrent executions. See `docs/project-overview.md`.
 
 Optional, to try the agent for real: put `ANTHROPIC_API_KEY` in `.env` (or, free and local, set
 `LLM_PROVIDER=ollama` after `ollama pull qwen2.5:7b`), start the mocks, then
@@ -40,7 +43,7 @@ uv run uvicorn app.main:app --reload # http://127.0.0.1:8000/docs
 uv run uvicorn mocks.main:app --port 8001  # mock payment/shipping/helpdesk, http://127.0.0.1:8001/docs
 uv run python -m scripts.policy_search "my return hasn't arrived yet"  # see ranked policy citations
 uv run python -m scripts.mint_token --reviewer "reviewer|ravi"  # token that can approve/reject
-uv run python -m scripts.worker      # background worker: agent runs, approval resumes, expiry sweep
+uv run python -m scripts.worker      # background worker: agent runs, approval resumes, expiry + refund reconcile sweeps
 uv run python -m scripts.expire_proposals  # expire stale proposals now (the worker also does it every 5 min)
 ```
 
