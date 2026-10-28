@@ -13,6 +13,7 @@ import signal
 import threading
 
 from app.agent.checkpoint import get_checkpointer
+from app.config import settings
 from app.db.session import SessionLocal
 from app.integrations.http import ServiceClient
 from app.integrations.payment import PaymentClient
@@ -32,8 +33,8 @@ def main() -> None:
     worker_id = default_worker_id()
     with ServiceClient() as http:
         ctx = WorkerContext(llm=build_llm(), shipping=ShippingClient(http), payment=PaymentClient(http),
-                            embedder=get_embedder(), checkpointer=get_checkpointer())
-        logging.info("worker %s up, model: %s", worker_id, describe_llm())
+                            embedder=get_embedder(), checkpointer=get_checkpointer(), mode=settings.agent_mode)
+        logging.info("worker %s up, model: %s, agent mode: %s", worker_id, describe_llm(), settings.agent_mode)
         if args.once:
             with SessionLocal() as db:
                 jobs = drain(db, ctx, worker_id)

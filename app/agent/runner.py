@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.checkpoint import get_checkpointer
+from app.config import settings
 from app.agent.graph import AgentDeps, build_graph
 from app.db.models import AuditEvent, Job, Ticket, WorkflowRun
 from app.integrations.payment import PaymentClient
@@ -77,12 +78,12 @@ def execute_run(db: Session, deps: AgentDeps, checkpointer, run: WorkflowRun, jo
 
 def run_agent(db: Session, llm: LLM, shipping: ShippingClient, ticket_id: str, actor: str,
               embedder: Embedder | None = None, checkpointer=None,
-              payment: PaymentClient | None = None) -> WorkflowRun:
+              payment: PaymentClient | None = None, mode: str | None = None) -> WorkflowRun:
     """start_run + execute it right here, for scripts and tests. Errors are final (no retry)."""
     from app.jobs.worker import WorkerContext, process  # worker imports this module
 
     run, job = start_run(db, ticket_id, actor)
     ctx = WorkerContext(llm=llm, shipping=shipping, payment=payment, embedder=embedder or get_embedder(),
-                        checkpointer=checkpointer or get_checkpointer())
+                        checkpointer=checkpointer or get_checkpointer(), mode=mode or settings.agent_mode)
     process(db, ctx, queue.claim_job(db, job.id, "inline"), raise_errors=True)
     return db.get(WorkflowRun, run.id, populate_existing=True)

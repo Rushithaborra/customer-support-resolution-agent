@@ -45,6 +45,7 @@ class WorkerContext:
     payment: PaymentClient | None = None
     embedder: Embedder | None = None
     checkpointer: object | None = None
+    mode: str = "single"  # agent architecture for agent_run jobs
     now: Callable[[], datetime] = field(default=queue.utcnow)
 
 
@@ -56,7 +57,8 @@ def default_worker_id() -> str:
 
 
 def _agent_run(db: Session, ctx: WorkerContext, job: Job) -> None:
-    deps = AgentDeps(db=db, llm=ctx.llm, shipping=ctx.shipping, embedder=ctx.embedder, payment=ctx.payment)
+    deps = AgentDeps(db=db, llm=ctx.llm, shipping=ctx.shipping, embedder=ctx.embedder, payment=ctx.payment,
+                     mode=ctx.mode)
     execute_run(db, deps, ctx.checkpointer, db.get(WorkflowRun, job.run_id), job)
 
 

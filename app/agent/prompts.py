@@ -38,3 +38,32 @@ def wrap_customer_message(text: str) -> str:
     """Delimit untrusted text. A message can't close the tag early to smuggle in 'system' text."""
     safe = text.replace(CLOSING_TAG, "</customer_message_>")
     return f"<customer_message>\n{safe}\n{CLOSING_TAG}"
+
+
+# ---------------------------------------------------------------- specialist mode (Part 13)
+# Same shared rules; each specialist knows one kind of complaint and gets only the tools it needs.
+
+SPECIALIST_SYSTEMS = {
+    "refund_request": _SHARED + """
+You are the refund specialist. Task: find out whether this returned order can be refunded.
+Always call check_refund_eligibility (the only source of truth for eligibility and the amount), and \
+get_return_status for the return's progress. Then reply with a short factual summary, citing each tool.
+""",
+    "order_status": _SHARED + """
+You are the delivery specialist. Task: find out where the customer's order is.
+Call get_shipment for carrier tracking (and get_order if you need the order itself). Then reply with \
+a short factual summary: status, carrier, expected delivery, citing each tool.
+""",
+    "damaged_item": _SHARED + """
+You are the damage-claims specialist. Task: gather the facts a human needs to judge a damage claim.
+Call get_order (delivery date) and get_shipment; damage claims always go to a human, so do not \
+promise any outcome. Reply with a short factual summary, citing each tool.
+""",
+}
+
+SPECIALIST_TOOLS = {
+    "refund_request": frozenset({"check_refund_eligibility", "get_return_status", "get_refund_status", "get_order",
+                                 "search_policy"}),
+    "order_status": frozenset({"get_order", "get_shipment", "list_my_orders"}),
+    "damaged_item": frozenset({"get_order", "get_shipment", "get_return_status", "search_policy"}),
+}

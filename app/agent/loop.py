@@ -44,7 +44,7 @@ def run_tool_loop(llm: LLM, ctx: ToolContext, *, system: str, user_message: str,
     if preface:
         content = f"{preface}\n\n{content}"
     messages: list[dict] = [{"role": "user", "content": content}]
-    specs = tool_specs()
+    specs = tool_specs(ctx.allowed_tools)
     out = LoopResult(stop="step_limit", text="")
 
     for _ in range(max_steps):

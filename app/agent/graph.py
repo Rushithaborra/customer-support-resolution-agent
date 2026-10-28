@@ -28,7 +28,8 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.agent.loop import run_tool_loop
-from app.agent.prompts import INVESTIGATE_SYSTEM, TRIAGE_SYSTEM, wrap_customer_message
+from app.agent.prompts import (INVESTIGATE_SYSTEM, SPECIALIST_SYSTEMS, SPECIALIST_TOOLS, TRIAGE_SYSTEM,
+                               wrap_customer_message)
 from app.agent.schemas import InvestigationSummary, RefundProposalDraft, TicketTriage
 from app.agent.tools import ToolContext
 from app.db.models import ActionProposal, AuditEvent, Ticket, WorkflowRun
@@ -89,6 +90,9 @@ class AgentDeps:
     shipping: ShippingClient | None = None
     embedder: Embedder | None = None
     payment: PaymentClient | None = None  # only the execute_refund step uses it
+    # "single": one generalist investigates every category. "specialist": a per-category
+    # investigator with its own prompt and tool allow-list (Part 13 compares the two).
+    mode: str = "single"
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
 
@@ -97,6 +101,12 @@ def _add_usage(state: AgentState, usage: Usage, models: list[str]) -> dict:
     return {"usage": {"input_tokens": u["input_tokens"] + usage.input_tokens,
                       "output_tokens": u["output_tokens"] + usage.output_tokens},
             "models": (state.get("models") or []) + models}
+
+
+def _investigator(deps: "AgentDeps", category: str) -> tuple[str, frozenset[str] | None]:
+    if deps.mode == "specialist" and category in SPECIALIST_SYSTEMS:
+        return SPECIALIST_SYSTEMS[category], SPECIALIST_TOOLS[category]
+    return INVESTIGATE_SYSTEM, None
 
 
 def _escalate(reason: str) -> dict:
@@ -151,9 +161,10 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         return {"order_id": order_id}
 
     def investigate(state: AgentState) -> dict:
+        system, allowed = _investigator(deps, state["triage"]["category"])
         ctx = ToolContext(db=db, customer_id=state["customer_id"], shipping=deps.shipping,
-                          run_id=state["run_id"], audit_buffer=[], embedder=deps.embedder)
-        r = run_tool_loop(llm, ctx, system=INVESTIGATE_SYSTEM, user_message=state["message"],
+                          run_id=state["run_id"], audit_buffer=[], embedder=deps.embedder, allowed_tools=allowed)
+        r = run_tool_loop(llm, ctx, system=system, user_message=state["message"],
                           preface=f"System-verified order under investigation: {state['order_id']}")
         out = {"trace": [asdict(t) for t in r.trace], "audit": ctx.audit_buffer,
                "investigation_text": r.text, **_add_usage(state, r.usage, r.models)}
@@ -166,8 +177,8 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
         content = (f"{wrap_customer_message(state['message'])}\n\n"
                    f"Tool calls made:\n{calls or '- none'}\n\n"
                    f"Investigator's notes (derived from tool results):\n{state['investigation_text']}")
-        r = structured_call(llm, system=INVESTIGATE_SYSTEM, model=InvestigationSummary,
-                            messages=[{"role": "user", "content": content}])
+        r = structured_call(llm, system=_investigator(deps, state["triage"]["category"])[0],
+                            model=InvestigationSummary, messages=[{"role": "user", "content": content}])
         if not isinstance(r, Parsed):
             return {**_escalate(f"summary_failed:{r.reason}"), **_add_usage(state, r.usage, [])}
         return {"summary": r.value.model_dump(), "model_suggestion": r.value.recommended_next_step,
@@ -253,7 +264,8 @@ def _nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], dict]]:
                        "agreed": state.get("agreed"), "usage": state.get("usage"), "models": state.get("models"),
                        "policy_query": state.get("policy_query"), "citations": state.get("citations", []),
                        "proposal_draft": state.get("proposal_draft"),
-                       "proposal_violations": state.get("proposal_violations"), "proposal_id": proposal_id}
+                       "proposal_violations": state.get("proposal_violations"), "proposal_id": proposal_id,
+                       "agent_mode": deps.mode}
 
         if triage and ticket.category == "unclassified":  # never overwrite a human's classification
             ticket.category = triage["category"]

@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Which model backend: "anthropic" (paid API), "ollama" (free, local) or "demo"
     # (deterministic keyword rules, not an AI: for offline, repeatable UI demos).
     llm_provider: Literal["anthropic", "ollama", "demo"] = "anthropic"
+    # Agent architecture: one generalist investigator, or per-category specialists (Part 13).
+    agent_mode: Literal["single", "specialist"] = "single"
     demo_llm_delay_s: float = 0.8  # demo model: pause per call so the timeline fills in visibly
 
     # Local demo helpers (/dev/token persona login, /dev/faults). Never enable outside local dev.

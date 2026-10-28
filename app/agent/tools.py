@@ -45,6 +45,9 @@ class ToolContext:
     # the graph's single writer node instead of by the tool itself.
     audit_buffer: list[dict] | None = None
     embedder: Embedder | None = None  # needed only by search_policy
+    # Specialist mode (Part 13): only these tools exist for this run. Enforced in
+    # execute_tool, not just by hiding the specs from the model.
+    allowed_tools: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,7 @@ class ToolSuccess:
 
 @dataclass(frozen=True)
 class ToolFailure:
-    code: str        # not_found | invalid_input | unknown_tool | unavailable | internal_error
+    code: str        # not_found | invalid_input | unknown_tool | tool_not_allowed | unavailable | internal_error
     message: str
     retryable: bool = False
 
@@ -184,8 +187,8 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
 ]}
 
 
-def tool_specs() -> list[dict]:
-    return [t.spec() for t in TOOLS.values()]
+def tool_specs(names: frozenset[str] | None = None) -> list[dict]:
+    return [t.spec() for t in TOOLS.values() if names is None or t.name in names]
 
 
 def execute_tool(ctx: ToolContext, name: str, raw_input: object) -> ToolResult:
@@ -193,6 +196,8 @@ def execute_tool(ctx: ToolContext, name: str, raw_input: object) -> ToolResult:
     order_id = None
     if tool is None:
         result: ToolResult = ToolFailure("unknown_tool", f"No tool named {name!r}")
+    elif ctx.allowed_tools is not None and name not in ctx.allowed_tools:
+        result = ToolFailure("tool_not_allowed", f"{name!r} is not available to this specialist")
     else:
         try:
             inp = tool.input_model.model_validate(raw_input)
