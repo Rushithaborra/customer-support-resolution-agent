@@ -1,10 +1,14 @@
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import agent, customers, orders, staff, tickets
+from app.api import agent, customers, dev, orders, staff, tickets
 from app.db.session import get_db
+from app.llm.deps import describe_llm
 from app.services.errors import Conflict, NotEligible, NotFound, ProviderUnavailable
 
 app = FastAPI(title="Support Resolution Agent", version="0.1.0")
@@ -13,6 +17,16 @@ app.include_router(orders.router)
 app.include_router(tickets.router)
 app.include_router(staff.router)
 app.include_router(agent.router)
+app.include_router(dev.router)  # every route 404s unless DEV_MODE=true
+
+# The UI: static pages that call this same API with the user's token (Part 12).
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+app.mount("/ui", StaticFiles(directory=WEB_DIR, html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/ui/")
 
 
 @app.exception_handler(NotFound)
@@ -43,6 +57,6 @@ def health(db: Session = Depends(get_db)):
     would report 'ok' while every real request fails."""
     try:
         db.execute(text("SELECT 1"))
-        return {"status": "ok", "database": "ok"}
+        return {"status": "ok", "database": "ok", "model": describe_llm()}
     except Exception:
         return JSONResponse(status_code=503, content={"status": "degraded", "database": "unreachable"})

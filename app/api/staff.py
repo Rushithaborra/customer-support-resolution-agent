@@ -27,6 +27,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+@router.get("/tickets", response_model=list[StaffTicketOut])
+def list_tickets(status: Literal["open", "awaiting_customer", "awaiting_approval", "awaiting_provider", "escalated",
+                                 "resolved"] | None = None,
+                 _: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
+    """The support queue, newest first."""
+    return [with_outcome(db, t, StaffTicketOut) for t in resolution.list_tickets(db, status)]
+
+
 @router.get("/tickets/{ticket_id}", response_model=StaffTicketOut)
 def get_ticket(ticket_id: str, _: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
     return with_outcome(db, resolution.get_ticket(db, ticket_id), StaffTicketOut)

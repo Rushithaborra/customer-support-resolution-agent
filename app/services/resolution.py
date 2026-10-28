@@ -115,6 +115,13 @@ def propose_refund(db: Session, staff: Staff, ticket_id: str, embedder: Embedder
     return proposal
 
 
+def list_tickets(db: Session, status: str | None, limit: int = 100) -> list[Ticket]:
+    q = select(Ticket).order_by(Ticket.created_at.desc()).limit(limit)
+    if status:
+        q = q.where(Ticket.status == status)
+    return list(db.scalars(q).all())
+
+
 def list_proposals(db: Session, status: str | None) -> list[ActionProposal]:
     q = select(ActionProposal).order_by(ActionProposal.created_at.desc())
     if status:

@@ -14,6 +14,7 @@ from app.db.models import AuditEvent, Job, WorkflowRun
 from app.db.session import get_db
 from app.schemas import AgentRunOut, JobOut, RunEventOut
 from app.services.errors import NotFound
+from app.services.resolution import get_ticket
 
 router = APIRouter(prefix="/staff", tags=["agent"])
 
@@ -36,6 +37,15 @@ def start(ticket_id: str, response: Response, staff: Staff = Depends(get_current
     run, _ = start_run(db, ticket_id, actor=staff.actor)
     response.headers["Location"] = f"/staff/agent-runs/{run.id}"
     return _run_out(db, run)
+
+
+@router.get("/tickets/{ticket_id}/agent-runs", response_model=list[AgentRunOut])
+def list_for_ticket(ticket_id: str, _: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
+    """A ticket's runs, newest first (the console follows the latest one)."""
+    get_ticket(db, ticket_id)
+    runs = db.scalars(select(WorkflowRun).where(WorkflowRun.ticket_id == ticket_id)
+                      .order_by(WorkflowRun.started_at.desc(), WorkflowRun.id.desc())).all()
+    return [_run_out(db, r) for r in runs]
 
 
 @router.get("/agent-runs/{run_id}", response_model=AgentRunOut)
