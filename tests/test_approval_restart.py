@@ -2,6 +2,7 @@
 
 "Restart" = the graph and checkpointer objects that paused the run are thrown away, and the
 decision is handled by a brand-new PostgresSaver on new connections, the way a fresh process would.
+Since Part 10 the decision request only queues the resume; `work` plays the worker.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ import pytest
 from app.agent.checkpoint import get_checkpointer, open_checkpointer
 from app.agent.graph import AgentDeps, build_graph
 from app.agent.resume import resume_for_proposal
-from app.db.models import ActionProposal, RefundOperation, Ticket, WorkflowRun
+from app.db.models import ActionProposal, Job, RefundOperation, Ticket, WorkflowRun
 from app.main import app
 from app.services.approvals import expire_stale
 from tests.agent_scripts import draft, open_ticket, refund_script
@@ -63,38 +64,47 @@ def refunds_at_provider(mock_admin, proposal_id: str) -> list:
 # ---------------------------------------------------------------- the three paths
 
 
-def test_approve_after_restart_executes_once(paused, restart, staff_client, mock_admin, db):
+def test_approve_after_restart_executes_once(paused, restart, staff_client, mock_admin, db, work):
     run, p = paused
-    restart()
+    saver = restart()
     r = staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER, json={"payload_hash": p.payload_hash})
-    assert r.status_code == 200, r.json()
+    assert r.status_code == 202, r.json()
     body = r.json()
-    assert (body["run_status"], body["refund"]["status"], body["proposal"]["status"]) == \
-        ("completed", "succeeded", "executed")
+    assert (body["run_status"], body["refund"], body["proposal"]["status"]) == ("paused", None, "approved")
+    assert refunds_at_provider(mock_admin, p.id) == []  # nothing moves until the worker runs
+
+    [job] = work(saver=saver)
+    assert (job.id, job.kind, job.status) == (body["resume_job_id"], "resume", "succeeded")
+    assert db.get(ActionProposal, p.id).status == "executed"
+    assert db.get(WorkflowRun, run.id).status == "completed"
     assert len(refunds_at_provider(mock_admin, p.id)) == 1
     assert db.get(Ticket, run.ticket_id).status == "resolved"
     assert db.get(WorkflowRun, run.id).outcome["decision"] == "approved"
     assert graph_next(db, run.thread_id) == ()  # workflow finished
 
 
-def test_reject_after_restart_finishes_without_refund(paused, restart, staff_client, mock_admin, db):
+def test_reject_after_restart_finishes_without_refund(paused, restart, staff_client, mock_admin, db, work):
     run, p = paused
-    restart()
+    saver = restart()
     r = staff_client.post(f"/staff/proposals/{p.id}/reject", headers=REVIEWER)
+    assert r.status_code == 202
     assert (r.json()["proposal"]["status"], r.json()["run_status"], r.json()["refund"]) == ("rejected", "completed", None)
+    work(saver=saver)
     assert refunds_at_provider(mock_admin, p.id) == []
     assert db.get(Ticket, run.ticket_id).status == "open"
     assert db.get(WorkflowRun, run.id).outcome["decision"] == "rejected"
     assert graph_next(db, run.thread_id) == ()
 
 
-def test_expire_after_restart_escalates(paused, restart, staff_client, mock_admin, db):
+def test_expire_after_restart_escalates(paused, restart, staff_client, mock_admin, db, work):
     run, p = paused
     p.created_at = datetime.now(timezone.utc) - timedelta(hours=49)  # nobody reviewed it for 49h
     db.commit()
-    restart()
+    saver = restart()
     r = staff_client.post("/staff/maintenance/expire-proposals", headers=STAFF)
     assert r.json() == {"expired": [p.id]}
+    assert graph_next(db, run.thread_id) == ("await_approval",)  # stored as expired; the worker finishes it
+    work(saver=saver)
     assert db.get(ActionProposal, p.id).status == "expired"
     assert refunds_at_provider(mock_admin, p.id) == []
     assert db.get(Ticket, run.ticket_id).status == "escalated"
@@ -106,11 +116,14 @@ def test_expire_after_restart_escalates(paused, restart, staff_client, mock_admi
 # ---------------------------------------------------------------- safety around resume
 
 
-def test_approving_twice_and_resuming_a_finished_run_refund_once(paused, staff_client, mock_admin, db, checkpointer):
+def test_approving_twice_and_resuming_a_finished_run_refund_once(paused, staff_client, mock_admin, db,
+                                                                  checkpointer, work):
     run, p = paused
     staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER, json={"payload_hash": p.payload_hash})
     again = staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER, json={"payload_hash": p.payload_hash})
     assert again.status_code == 409 and again.json()["detail"]["code"] == "not_pending"
+    work()
+    assert db.query(Job).filter_by(run_id=run.id, kind="resume").count() == 1  # one resume job, not two
     resume_for_proposal(db, p.id, "approved", checkpointer=checkpointer, payment=None)  # no-op: not paused
     assert len(refunds_at_provider(mock_admin, p.id)) == 1
     assert db.query(RefundOperation).filter_by(proposal_id=p.id).count() == 1
@@ -124,24 +137,26 @@ def test_forged_resume_without_approval_executes_nothing(paused, db, mock_admin,
     assert refunds_at_provider(mock_admin, p.id) == []
 
 
-def test_provider_down_during_execution_then_reconciled_once(paused, staff_client, mock_admin, db):
+def test_provider_down_during_execution_then_reconciled_once(paused, staff_client, mock_admin, db, work):
     run, p = paused
     inject(mock_admin, "error_503", "payment.create_refund")
-    body = staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER,
-                             json={"payload_hash": p.payload_hash}).json()
-    assert body["refund"]["status"] == "submitted"
+    staff_client.post(f"/staff/proposals/{p.id}/approve", headers=REVIEWER, json={"payload_hash": p.payload_hash})
+    work()
+    refund = db.query(RefundOperation).filter_by(proposal_id=p.id).one()
+    assert refund.status == "submitted"
     assert db.get(WorkflowRun, run.id).outcome["execution"] == {"status": "provider_unavailable"}
     assert db.get(Ticket, run.ticket_id).status == "awaiting_provider"
-    op = staff_client.post(f"/staff/refunds/{body['refund']['id']}/refresh", headers=STAFF).json()
+    op = staff_client.post(f"/staff/refunds/{refund.id}/refresh", headers=STAFF).json()
     assert op["status"] == "succeeded"
     assert len(refunds_at_provider(mock_admin, p.id)) == 1
 
 
-def test_superseded_agent_proposal_is_invalidated(paused, staff_client, mock_admin, db):
+def test_superseded_agent_proposal_is_invalidated(paused, staff_client, mock_admin, db, work):
     run, p = paused
     r = staff_client.post(f"/staff/tickets/{run.ticket_id}/proposals", headers=STAFF)  # a human re-proposes
     assert r.status_code == 201
     assert db.get(ActionProposal, p.id).status == "superseded"
+    work()
     old = db.get(WorkflowRun, run.id)
     assert (old.status, old.outcome["decision"]) == ("completed", "invalidated")
     assert graph_next(db, run.thread_id) == ()

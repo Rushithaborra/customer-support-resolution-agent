@@ -20,7 +20,7 @@ def tool_turn(*calls: tuple[str, object], model: str = "scripted") -> LLMTurn:
 
 
 class ScriptedLLM:
-    def __init__(self, turns: list[LLMTurn | Exception]):
+    def __init__(self, turns: list[LLMTurn | BaseException]):
         self._turns = list(turns)
         self.requests: list[dict] = []
 
@@ -29,6 +29,6 @@ class ScriptedLLM:
         if not self._turns:
             raise AssertionError("ScriptedLLM: script exhausted (the code under test made an extra call)")
         nxt = self._turns.pop(0)
-        if isinstance(nxt, Exception):
+        if isinstance(nxt, BaseException):  # BaseException too: tests simulate a killed worker
             raise nxt
         return nxt

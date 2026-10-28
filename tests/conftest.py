@@ -184,6 +184,24 @@ def agent(db, service_client, checkpointer):
     return run
 
 
+@pytest.fixture
+def work(db, service_client, checkpointer):
+    """Act as the background worker: run every due job on the test's session, then return them."""
+    from app.integrations.payment import PaymentClient
+    from app.integrations.shipping import ShippingClient
+    from app.jobs.worker import WorkerContext, drain
+    from app.policy.embedder import get_embedder
+
+    def run(llm=None, *, saver=None, payment=None, now=None, worker_id: str = "test-worker"):
+        ctx = WorkerContext(llm=llm, shipping=ShippingClient(service_client),
+                            payment=payment or PaymentClient(service_client), embedder=get_embedder(),
+                            checkpointer=saver or checkpointer)
+        if now is not None:
+            ctx.now = lambda: now
+        return drain(db, ctx, worker_id)
+    return run
+
+
 @pytest.fixture(scope="session", autouse=True)
 def policies_ingested():
     """Policies are reference data (like the seed). Ingesting is idempotent, so it's

@@ -87,12 +87,13 @@ def test_non_refund_routes_create_no_proposal(agent, client, db):
 # ---------------------------------------------------------------- the full path
 
 
-def test_agent_proposal_approved_and_executed_once(agent, ticket, staff_client, mock_admin, db):
+def test_agent_proposal_approved_and_executed_once(agent, ticket, staff_client, mock_admin, db, work):
     run = agent(ticket, refund_script(draft("ord_1001")))
     p = staff_client.get(f"/staff/proposals/{run.outcome['proposal_id']}", headers=STAFF).json()
 
     assert staff_client.post(f"/staff/proposals/{p['id']}/approve", headers=REVIEWER_H,
-                             json={"payload_hash": p["payload_hash"]}).status_code == 200
+                             json={"payload_hash": p["payload_hash"]}).status_code == 202
+    work()  # the resumed workflow executes the refund
     op = staff_client.post(f"/staff/proposals/{p['id']}/execute", headers=STAFF).json()
     assert (op["status"], op["amount_minor"]) == ("succeeded", 249900)
     refunds = mock_admin.get("/payment/refunds", params={"idempotency_key": f"refund-{p['id']}"}).json()["refunds"]
