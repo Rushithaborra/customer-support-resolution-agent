@@ -7,7 +7,8 @@ from app.integrations.http import ServiceClient
 from app.integrations.payment import PaymentClient
 from app.integrations.results import Ok, Rejected, Retryable, UnknownOutcome
 from app.integrations.shipping import ShippingClient
-from tests.conftest import CLIENT_TIMEOUT_S, _free_port, inject
+from mocks.server import _free_port
+from tests.conftest import CLIENT_TIMEOUT_S, inject
 
 
 @pytest.fixture

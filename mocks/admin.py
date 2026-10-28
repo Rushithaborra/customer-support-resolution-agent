@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from mocks import helpdesk, payment
+from mocks import data, helpdesk, payment
 from mocks.config import require_api_key
 from mocks.faults import Fault, FaultKind, faults
 
@@ -37,6 +37,22 @@ def reset():
     faults.reset()
     payment.reset()
     helpdesk.reset()
+    data.reset_extra_shipments()
+
+
+class ShipmentIn(BaseModel):
+    carrier: str = "SwiftShip"
+    tracking_number: str
+    status: Literal["label_created", "in_transit", "out_for_delivery", "delivered", "lost"]
+    eta: str | None = None
+    delivered_at: str | None = None
+    return_shipment: dict | None = None
+
+
+@router.post("/shipping/shipments/{order_id}", status_code=204)
+def register_shipment(order_id: str, body: ShipmentIn):
+    """Evals create their own synthetic orders; this gives the carrier tracking for them."""
+    data.SHIPMENTS[order_id] = body.model_dump()
 
 
 @router.post("/payment/config", status_code=204)

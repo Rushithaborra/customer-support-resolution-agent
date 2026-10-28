@@ -30,3 +30,12 @@ SHIPMENTS: dict[str, dict] = {
                  "eta": None, "delivered_at": _days(40),
                  "return_shipment": _return("SSR200100", "delivered", _days(5))},
 }
+
+
+# Seed shipments, kept so a reset can drop shipments registered for evals.
+SEED_SHIPMENT_IDS = frozenset(SHIPMENTS)
+
+
+def reset_extra_shipments() -> None:
+    for order_id in set(SHIPMENTS) - SEED_SHIPMENT_IDS:
+        del SHIPMENTS[order_id]
