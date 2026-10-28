@@ -176,7 +176,7 @@ class WorkflowRun(Base):
 
 # ---------------------------------------------------------------- background jobs (Part 10)
 
-JOB_KINDS = ["agent_run", "resume", "expire_sweep"]
+JOB_KINDS = ["agent_run", "resume", "expire_sweep", "reconcile_sweep"]
 # A failed attempt goes back to "queued" with a later run_after; "dead" means retries ran out.
 JOB_STATUSES = ["queued", "running", "succeeded", "dead"]
 
@@ -315,6 +315,11 @@ class RefundOperation(TimestampMixin, Base):
     idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
     provider_reference: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(30), default="reserved")
+    # Part 11: the reconcile sweep asks the provider about any op whose outcome isn't final.
+    # NULL next_reconcile_at = not due (final, or parked for a human via needs_review_reason).
+    reconcile_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_reconcile_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    needs_review_reason: Mapped[str | None] = mapped_column(String(64))
 
 
 class AuditEvent(Base):
