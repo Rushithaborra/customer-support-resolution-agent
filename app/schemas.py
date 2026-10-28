@@ -156,6 +156,9 @@ class RefundOperationOut(BaseModel):
     idempotency_key: str
     provider_reference: str | None
     status: str
+    reconcile_attempts: int = 0
+    next_reconcile_at: datetime | None = None
+    needs_review_reason: str | None = None  # set: the sweep stopped; a human must check with the provider
 
 
 class DecisionOut(BaseModel):

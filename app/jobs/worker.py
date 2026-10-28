@@ -27,13 +27,15 @@ from app.integrations.shipping import ShippingClient
 from app.jobs import queue
 from app.llm.types import LLM, LLMConfigError
 from app.policy.embedder import Embedder
+from app.services import refunds
 from app.services.approvals import expire_stale
 from app.services.errors import Conflict, NotFound
 
 log = logging.getLogger("worker")
 
 PERMANENT = (LLMConfigError, ReadOnlyViolation, NotFound, Conflict)
-SWEEP_EVERY_S = 300
+# Periodic jobs: kind → every N seconds. Each worker tries to schedule them; dedupe keeps one per slot.
+PERIODIC = {"expire_sweep": 300, "reconcile_sweep": 60}
 
 
 @dataclass
@@ -69,7 +71,12 @@ def _expire_sweep(db: Session, ctx: WorkerContext, job: Job) -> None:
     db.commit()
 
 
-HANDLERS = {"agent_run": _agent_run, "resume": _resume, "expire_sweep": _expire_sweep}
+def _reconcile_sweep(db: Session, ctx: WorkerContext, job: Job) -> None:
+    refunds.reconcile_due(db, ctx.payment, ctx.now())
+
+
+HANDLERS = {"agent_run": _agent_run, "resume": _resume, "expire_sweep": _expire_sweep,
+            "reconcile_sweep": _reconcile_sweep}
 
 
 # ---------------------------------------------------------------- running jobs
@@ -110,10 +117,10 @@ def drain(db: Session, ctx: WorkerContext, worker_id: str = "drain", limit: int 
     return done
 
 
-def schedule_sweep(db: Session, now: datetime) -> Job:
-    """One expiry sweep per time bucket, however many workers try to schedule it."""
-    bucket = int(now.timestamp()) // SWEEP_EVERY_S
-    job = queue.enqueue(db, "expire_sweep", dedupe_key=f"expire_sweep:{bucket}", now=now)
+def schedule(db: Session, kind: str, now: datetime) -> Job:
+    """One periodic job per time bucket, however many workers try to schedule it."""
+    bucket = int(now.timestamp()) // PERIODIC[kind]
+    job = queue.enqueue(db, kind, dedupe_key=f"{kind}:{bucket}", now=now)
     db.commit()
     return job
 
@@ -121,13 +128,14 @@ def schedule_sweep(db: Session, now: datetime) -> Job:
 def serve(session_factory: Callable[[], Session], ctx: WorkerContext, worker_id: str,
           stop: threading.Event, poll_s: float = 1.0) -> None:
     """The long-running loop. `stop` is set by SIGINT/SIGTERM: the current job finishes first."""
-    next_sweep = 0.0
+    next_due = dict.fromkeys(PERIODIC, 0.0)
     while not stop.is_set():
         with session_factory() as db:
             now = ctx.now()
-            if now.timestamp() >= next_sweep:
-                schedule_sweep(db, now)
-                next_sweep = now.timestamp() + SWEEP_EVERY_S
+            for kind, every_s in PERIODIC.items():
+                if now.timestamp() >= next_due[kind]:
+                    schedule(db, kind, now)
+                    next_due[kind] = now.timestamp() + every_s
             job = run_once(db, ctx, worker_id)
         if job:
             log.info("job %s %s -> %s (attempt %s)", job.id, job.kind, job.status, job.attempts)

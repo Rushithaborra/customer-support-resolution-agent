@@ -119,6 +119,13 @@ def execute(proposal_id: str, staff: Staff = Depends(get_current_staff), db: Ses
     return refunds.execute(db, staff.actor, proposal_id, payment, _now())
 
 
+@router.get("/refunds", response_model=list[RefundOperationOut])
+def list_refunds(state: Literal["unsettled", "needs_review"] = "unsettled", _: Staff = Depends(get_current_staff),
+                 db: Session = Depends(get_db)):
+    """Refunds whose outcome isn't final. needs_review: the sweep gave up and a human must check."""
+    return refunds.list_unsettled(db, needs_review=state == "needs_review")
+
+
 @router.post("/refunds/{operation_id}/refresh", response_model=RefundOperationOut)
 def refresh(operation_id: str, staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db),
             payment: PaymentClient = Depends(get_payment_client)):
