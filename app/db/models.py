@@ -148,7 +148,7 @@ class Ticket(TimestampMixin, Base):
     summary: Mapped[str | None] = mapped_column(Text)
 
 
-RUN_STATUSES = ["running", "paused", "completed", "failed", "escalated"]
+RUN_STATUSES = ["queued", "running", "paused", "completed", "failed", "escalated"]
 # Chosen by code from code facts, never by the model (Part 6).
 AGENT_ROUTES = ["propose_refund", "explain_policy", "report_order_status", "escalate", "order_not_found"]
 
@@ -172,6 +172,41 @@ class WorkflowRun(Base):
     route: Mapped[str | None] = mapped_column(String(30))
     route_reason: Mapped[str | None] = mapped_column(String(100))
     outcome: Mapped[dict | None] = mapped_column(JSONB)
+
+
+# ---------------------------------------------------------------- background jobs (Part 10)
+
+JOB_KINDS = ["agent_run", "resume", "expire_sweep"]
+# A failed attempt goes back to "queued" with a later run_after; "dead" means retries ran out.
+JOB_STATUSES = ["queued", "running", "succeeded", "dead"]
+
+
+class Job(Base):
+    """Durable work queue in Postgres. Workers claim rows with FOR UPDATE SKIP LOCKED
+    and hold a lease (locked_until); a lease that runs out means the worker died,
+    and another worker may take the job over."""
+    __tablename__ = "jobs"
+    __table_args__ = (
+        status_check("kind", JOB_KINDS, "ck_jobs_kind"),
+        status_check("status", JOB_STATUSES, "ck_jobs_status"),
+        Index("ix_jobs_claimable", "status", "run_after"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("job"))
+    kind: Mapped[str] = mapped_column(String(20))
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_runs.id"), index=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(64))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    # Same key twice → one job (a double click, two workers scheduling the same sweep).
+    dedupe_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # ---------------------------------------------------------------- policies (RAG)
