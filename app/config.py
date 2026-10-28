@@ -27,8 +27,13 @@ class Settings(BaseSettings):
     http_connect_timeout_s: float = 2.0
     http_read_timeout_s: float = 5.0
 
-    # Which model backend: "anthropic" (paid API) or "ollama" (free, local).
-    llm_provider: Literal["anthropic", "ollama"] = "anthropic"
+    # Which model backend: "anthropic" (paid API), "ollama" (free, local) or "demo"
+    # (deterministic keyword rules, not an AI: for offline, repeatable UI demos).
+    llm_provider: Literal["anthropic", "ollama", "demo"] = "anthropic"
+    demo_llm_delay_s: float = 0.8  # demo model: pause per call so the timeline fills in visibly
+
+    # Local demo helpers (/dev/token persona login, /dev/faults). Never enable outside local dev.
+    dev_mode: bool = False
 
     # Ollama (local). qwen2.5:7b handles tool calls and JSON output well for its size.
     ollama_base_url: str = "http://127.0.0.1:11434"

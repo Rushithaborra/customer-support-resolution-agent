@@ -9,6 +9,9 @@ def build_llm() -> LLM:
     if settings.llm_provider == "ollama":
         from app.llm.ollama_client import OllamaLLM
         return OllamaLLM()
+    if settings.llm_provider == "demo":
+        from app.llm.demo import DemoLLM
+        return DemoLLM(delay_s=settings.demo_llm_delay_s)
     from app.llm.anthropic_client import AnthropicLLM
     return AnthropicLLM()
 
@@ -22,4 +25,6 @@ def get_llm() -> LLM:
 def describe_llm() -> str:
     if settings.llm_provider == "ollama":
         return f"ollama:{settings.ollama_model}"
+    if settings.llm_provider == "demo":
+        return "demo:rules (not an AI)"
     return f"anthropic:{settings.llm_model}"
