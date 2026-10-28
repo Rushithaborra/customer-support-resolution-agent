@@ -21,7 +21,8 @@ refund whose outcome is unknown automatically (a sweep asks the provider by idem
 backoff, and parks it for a human if it never gets an answer) and proves zero duplicate refunds
 across timeouts, crashes and concurrent executions. Part 12 adds a browser UI (customer panel,
 staff/reviewer console with workflow timeline, evidence and approval queue) where Demos A, B and C
-run. See `docs/project-overview.md`.
+run. Part 13 measures it: 60 synthetic cases with a held-out split, a single-agent vs
+specialist comparison, and a report reproducible from one command. See `docs/project-overview.md`.
 
 ## Run the demo
 Four terminals (Postgres running, seeded, policies ingested):
@@ -35,6 +36,16 @@ open http://127.0.0.1:8000/ui/                                               # p
 use `ollama` or `anthropic` for a real model. `DEV_MODE` enables the persona login and fault buttons;
 never enable it outside local development. Reset between demos with `uv run python -m scripts.seed_data`.
 The three demos are described on the start page and in `docs/parts/part-12-frontend.md`.
+
+## Evaluation
+60 synthetic cases (40 dev / 20 held-out) run through the real agent graph, graded
+deterministically from stored state (route, reason, proposal amount, unsafe proposals, leaks):
+```bash
+uv run python -m evals.run --model demo --mode single,specialist      # seconds
+uv run python -m evals.run --model ollama --mode single,specialist --resume   # hours on a laptop
+uv run python -m evals.report                                         # rebuild from saved results
+```
+Results: `evals/reports/report.md`. Synthetic data only; not production performance.
 
 Optional, to try the agent for real: put `ANTHROPIC_API_KEY` in `.env` (or, free and local, set
 `LLM_PROVIDER=ollama` after `ollama pull qwen2.5:7b`), start the mocks, then

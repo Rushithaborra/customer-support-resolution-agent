@@ -52,6 +52,21 @@ build step:
   - The internal HTTP client crashed on empty "204" replies.
 - **Verified.** All three demos ran against the real API, worker and mocks. **319 tests pass.**
 
+**Part 13 (evaluation).** The agent is now measured, not just tested:
+- **The suite.** 60 synthetic cases: 40 for tuning, 20 held back. Each brings its own order data and runs through the
+  real agent in a transaction that is rolled back afterwards. Scoring compares against what the system stored, with
+  no AI judge.
+- **Label check.** Every case is also run with a "perfect model". If code wouldn't reach a label even then, the label
+  is wrong and a test fails.
+- **Specialist mode.** A separate investigator for refunds, delivery and damage, each with its own prompt and only the
+  tools it needs. It is compared against the single agent on the same cases.
+- **Results on the local `qwen2.5:7b` model (about 4.5 hours of runs):**
+  - The single agent routes 70% of held-out cases correctly; specialists route 85%, using 18% fewer tokens.
+  - In both modes there were **zero unsafe refund proposals and zero data leaks**, injection cases included.
+  - Every miss was a hand-off to a human. The most common one was the model inventing a refund amount (for example
+    12990 paise instead of 249900), which code rejected every time.
+- **460 tests pass.**
+
 ## 2026-10-27
 
 Today the project went from an empty repo to a working, human-approved refund agent: Parts 1 to 9 of the roadmap, 33 commits.

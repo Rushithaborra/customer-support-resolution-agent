@@ -184,7 +184,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 10. Async runs | Job persistence, worker, `202 Accepted`, run status and event timeline | A run survives worker restart and resumes | Done |
 | 11. Refund safety | Reservation with `SELECT ... FOR UPDATE`, idempotent execution, reconciliation | Timeout, restart and concurrent tests produce zero duplicate refunds | Done |
 | 12. Frontend | Customer panel, workflow timeline, evidence panel, approval queue, outcome panel | Demos A, B and C run in the UI | Done |
-| 13. Evaluation | 60 synthetic cases, held-out set, metrics, single vs specialist comparison | Report is reproducible from one command | Not started |
+| 13. Evaluation | 60 synthetic cases, held-out set, metrics, single vs specialist comparison | Report is reproducible from one command | Done |
 | 14. Presentation | README, architecture diagram, demo recording, résumé entry | Another developer reproduces reported results | Not started |
 
 ## Open decisions and risks
