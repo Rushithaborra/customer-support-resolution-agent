@@ -181,7 +181,7 @@ The build runs in 14 parts; Parts 1 to 4 need no LLM, matching the guide's week-
 | 7. Proposals | Resolution proposals, payload hashing, code-side validation | Proposals carry evidence refs; wrong amounts are rejected by code | Done |
 | 8. Policy RAG | Synthetic versioned policies, chunking, embeddings, pgvector migration, citations | Correct policy section retrieved; no policy leads to escalation | Done |
 | 9. Human approval | Reviewer auth, approval API, `interrupt()` and resume, expiry, invalidation | Approve, reject and expire each follow their path after a restart | Done |
-| 10. Async runs | Job persistence, worker, `202 Accepted`, run status and event timeline | A run survives worker restart and resumes | Not started |
+| 10. Async runs | Job persistence, worker, `202 Accepted`, run status and event timeline | A run survives worker restart and resumes | Done |
 | 11. Refund safety | Reservation with `SELECT ... FOR UPDATE`, idempotent execution, reconciliation | Timeout, restart and concurrent tests produce zero duplicate refunds | Not started |
 | 12. Frontend | Customer panel, workflow timeline, evidence panel, approval queue, outcome panel | Demos A, B and C run in the UI | Not started |
 | 13. Evaluation | 60 synthetic cases, held-out set, metrics, single vs specialist comparison | Report is reproducible from one command | Not started |
@@ -197,7 +197,8 @@ One decision blocks Part 5: which LLM provider to use. It sets the tool-calling 
 - [x] Embedding model: `BAAI/bge-small-en-v1.5` (384 dims, local via fastembed), similarity cutoff 0.70 —
   decided for Part 8. pgvector 0.8.1 built from source for Homebrew PG16. Voyage is the Part 13 comparison.
 - [ ] Frontend stack (plain HTML + JS, React or Streamlit) — needed before Part 12
-- [ ] Worker approach (FastAPI BackgroundTasks or a queue such as Celery/RQ) — needed before Part 10
+- [x] Worker approach: Postgres job table claimed with `FOR UPDATE SKIP LOCKED`, leases and backoff;
+  `scripts.worker` process — decided for Part 10 (no Redis/Celery)
 - [x] Customer auth: signed HS256 JWT (PyJWT), `sub` → `customers.external_auth_subject` — decided for Part 2
 
 ### Risks

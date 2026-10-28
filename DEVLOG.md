@@ -1,5 +1,28 @@
 # Dev Log
 
+## 2026-10-28
+
+Finished the free local model setup and built Part 10 (async runs).
+
+**Local model.** The `qwen2.5:7b` download had stopped before finishing, so it was restarted in the background. The
+Ollama adapter code is done and tested. The live run on the local model waits for the download.
+
+**Part 10.** Agent runs no longer happen inside the web request:
+- Starting a run, or approving a refund, now records the work as a job in a Postgres table and returns `202 Accepted`
+  straight away.
+- A separate worker process (`scripts.worker`) picks jobs up with `SELECT … FOR UPDATE SKIP LOCKED`, so several
+  workers never grab the same job.
+- Each job carries a time-limited lease. If a worker dies, its lease runs out and another worker takes the job over,
+  continuing from the run's last LangGraph checkpoint instead of starting again.
+- Failures retry with backoff. After 3 attempts a job is dead-lettered and its ticket goes to a human.
+- The worker also runs the proposal-expiry sweep every 5 minutes.
+- A new `/events` endpoint shows each run's timeline.
+
+**Verified with real processes.** A worker was `kill -9`'d halfway through a run. A second worker took over without
+repeating finished steps. After approval, exactly one refund went through. A test also kills the worker right after
+the payment provider accepted a refund: the next worker reconciles it by idempotency key, and the provider still has
+one refund. **275 tests pass.**
+
 ## 2026-10-27
 
 Today the project went from an empty repo to a working, human-approved refund agent: Parts 1 to 9 of the roadmap, 33 commits.
