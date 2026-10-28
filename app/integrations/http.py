@@ -53,7 +53,8 @@ class ServiceClient:
             return UnknownOutcome(reason) if is_write else Retryable(reason)
 
         if r.is_success:
-            return Ok(r.json(), replayed=r.headers.get("Idempotent-Replayed") == "true")
+            body = r.json() if r.content else None  # 204 No Content has no body to parse
+            return Ok(body, replayed=r.headers.get("Idempotent-Replayed") == "true")
         if r.status_code in _REFUSED_STATUSES or r.status_code == 409:
             # 409 request_in_progress: the first attempt is still running under the same key.
             return Retryable(f"{r.status_code} {_error_code(r)}")
