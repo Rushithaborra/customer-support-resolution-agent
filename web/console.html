@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Support Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top"></header>
+  <main class="grid cols-3">
+    <div class="stack">
+      <section class="panel">
+        <h2>Approval queue</h2>
+        <ul id="approvals" class="list"></ul>
+      </section>
+      <section class="panel">
+        <div class="row"><h2 style="flex:1">Tickets</h2>
+          <select id="status-filter" style="width:auto">
+            <option value="">All</option><option>open</option><option>awaiting_approval</option>
+            <option>awaiting_provider</option><option>escalated</option><option>resolved</option>
+          </select>
+        </div>
+        <ul id="queue" class="list"></ul>
+      </section>
+      <section class="panel demo" id="demo-panel" hidden>
+        <h2>Demo controls</h2>
+        <p class="note">Make the mock payment provider misbehave on the <b>next</b> refund call.</p>
+        <div class="row" id="faults"></div>
+        <h3>Refunds not settled yet</h3>
+        <div id="unsettled" class="stack"></div>
+        <div id="demo-status"></div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="panel" id="ticket"><p class="muted">Select a ticket.</p></section>
+      <section class="panel">
+        <h2>Workflow timeline</h2>
+        <ol id="timeline" class="timeline"><li class="muted">No run yet.</li></ol>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="panel" id="proposal" hidden></section>
+      <section class="panel">
+        <h2>Evidence</h2>
+        <div id="evidence"><p class="muted">The agent's findings appear here after a run.</p></div>
+      </section>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    const state = { ticketId: null, actionMessage: null, isReviewer: false, me: null };
+
+    // ---------------------------------------------------------------- timeline
+
+    function describe(e) {
+      const p = e.redacted_payload || {};
+      switch (e.event_type) {
+        case "agent.queued": return ["info", "Run queued (202 Accepted)"];
+        case "job.claimed": return [p.taken_over ? "warn" : "info",
+          `Worker ${p.worker} picked up ${p.kind} (attempt ${p.attempt}${p.taken_over ? ", took over from a dead worker" : ""})`];
+        case "node.completed": return ["ok", `Step done: ${p.node}`];
+        case "tool.called": return [p.ok ? "ok" : "warn", `Tool ${p.tool}(${p.order_id ?? ""}) → ${p.ok ? "ok" : p.code}`];
+        case "agent.routed": return ["info", `Code chose route: ${p.route} (${p.reason})${p.agreed === false ? ". The model suggested otherwise" : ""}`];
+        case "proposal.created": return ["info", "Refund proposal created"];
+        case "agent.paused": return ["info", "Paused: waiting for a reviewer"];
+        case "proposal.approved": return ["ok", `Approved by ${e.actor}`];
+        case "proposal.rejected": return ["bad", `Rejected by ${e.actor}`];
+        case "proposal.expired": return ["warn", "Proposal expired"];
+        case "agent.resumed": return ["info", `Workflow resumed: ${p.decision}${p.execution?.status ? ", refund " + p.execution.status : ""}`];
+        case "refund.reserved": return ["info", "Refund amount reserved (FOR UPDATE)"];
+        case "refund.submitted": return ["info", "Sent to payment provider"];
+        case "refund.succeeded": return ["ok", "Provider confirmed: succeeded"];
+        case "refund.processing": return ["warn", "Provider: processing"];
+        case "refund.failed": case "refund.rejected": return ["bad", "Provider refused the refund"];
+        case "refund.outcome_unknown": return ["warn", `Outcome unknown (${p.reason}). Will reconcile, never resend blindly`];
+        case "refund.provider_unavailable": return ["warn", `Provider unavailable (${p.reason})`];
+        case "refund.needs_review": return ["bad", `Parked for a human: ${p.reason}`];
+        case "refund.cancelled_unsent": return ["warn", "Never-sent refund cancelled (approval expired)"];
+        case "job.dead_lettered": return ["bad", `Job gave up after ${p.attempts} attempts`];
+        default: return ["", e.event_type];
+      }
+    }
+
+    function renderTimeline(events) {
+      if (!events.length) return mount("timeline", el("li", { class: "muted" }, "No run yet."));
+      mount("timeline", events.map((e) => {
+        const [tone, text] = describe(e);
+        return el("li", { class: tone }, el("span", { class: "t" }, time(e.created_at)), text);
+      }));
+    }
+
+    // ---------------------------------------------------------------- evidence
+
+    function kv(rows) {
+      return el("table", { class: "kv" }, el("tbody", {},
+        rows.filter(Boolean).map(([k, v]) => el("tr", {}, el("td", {}, k), el("td", {}, v ?? "-")))));
+    }
+
+    function renderEvidence(run) {
+      if (!run || !run.outcome) {
+        return mount("evidence", el("p", { class: "muted" },
+          run ? `Run ${run.status}… evidence appears when it finishes.` : "The agent's findings appear here after a run."));
+      }
+      const o = run.outcome;
+      const t = o.triage || {};
+      mount("evidence",
+        el("h3", {}, "Decision"),
+        kv([
+          ["Route (chosen by code)", el("span", {}, badge(run.route), " ", run.route_reason || "")],
+          ["Model suggested", o.model_suggestion ? `${o.model_suggestion} ${o.agreed ? "✓ agrees" : "✗ code overrode it"}` : "-"],
+          ["Run status", badge(run.status)],
+          ["Models used", (o.models || []).filter((m, i, a) => a.indexOf(m) === i).join(", ")],
+        ]),
+        el("h3", {}, "Triage (model)"),
+        kv([["Category", t.category], ["Order", t.order_id], ["Needs human", String(t.needs_human ?? "-")]]),
+        el("h3", {}, "Tool calls (read-only)"),
+        (o.trace || []).length
+          ? el("ul", { class: "list" }, o.trace.map((c) => el("li", {},
+              el("span", { class: "mono" }, `${c.tool}(${JSON.stringify(c.input)})`), " ",
+              c.ok ? badge("ok") : el("span", { class: "badge bad" }, c.code))))
+          : el("p", { class: "muted" }, "None."),
+        el("h3", {}, "Policy cited"),
+        (o.citations || []).length
+          ? el("ul", { class: "list" }, o.citations.map((c) => el("li", {},
+              el("div", { class: "mono" }, c.ref), el("div", { class: "sub" }, `${c.heading}, similarity ${c.similarity?.toFixed(2)}`))))
+          : el("p", { class: "muted" }, o.policy_query === null ? "No policy applies." : "None."),
+        o.summary ? [el("h3", {}, "Findings (model, each tied to a tool call)"),
+          el("ul", { class: "list" }, o.summary.findings.map((f) => el("li", {},
+            f.statement, el("div", { class: "sub mono" }, f.evidence_ref))))] : null,
+        o.proposal_violations ? [el("h3", {}, "Draft rejected by code"),
+          el("ul", { class: "list" }, o.proposal_violations.map((v) => el("li", {}, el("b", {}, v.code), " ", v.detail)))] : null,
+        o.decision ? [el("h3", {}, "After approval"),
+          kv([["Decision", o.decision], ["Execution", o.execution?.status]])] : null);
+    }
+
+    // ---------------------------------------------------------------- proposal card
+
+    async function decide(p, action) {
+      try {
+        const body = action === "approve" ? { payload_hash: p.payload_hash } : undefined;
+        const r = await api(`/staff/proposals/${p.id}/${action}`, { method: "POST", body });
+        state.actionMessage = { ok: true, text: r.resume_job_id
+          ? `${action === "approve" ? "Approved" : "Rejected"}. The workflow resumes in the background (job ${r.resume_job_id}).`
+          : `${action === "approve" ? "Approved" : "Rejected"}.` };
+      } catch (e) {
+        const why = { self_approval: "Four-eyes rule: you created this proposal, so someone else must decide it.",
+                      reviewer_required: "Only reviewers can decide proposals." }[e.code];
+        state.actionMessage = { ok: false, text: why ? `${e.message}. ${why}` : e.message };
+        if (e.status === 403) state.actionMessage.text = "403: only a reviewer can approve or reject. Switch user to Ravi.";
+      }
+      tick();
+    }
+
+    function renderProposal(p) {
+      const box = document.getElementById("proposal");
+      if (!p) { box.hidden = true; return; }
+      box.hidden = false;
+      const pay = p.payload;
+      const pending = p.status === "pending_approval";
+      mount(box,
+        el("h2", {}, "Refund proposal"),
+        el("div", { class: "row" }, el("span", { class: "amount" }, rupees(pay.amount_minor)), badge(p.status)),
+        kv([
+          ["Order", pay.order_id],
+          ["Reason (code)", pay.reason_code],
+          ["Proposed by", p.created_by],
+          ["Evidence refs", el("div", { class: "mono" }, (pay.evidence_refs || []).join("\n"))],
+          ["Policy", el("div", { class: "mono" }, (pay.policy_citations || []).join("\n"))],
+          ["Return", pay.evidence ? `${pay.evidence.return_status}, inspection ${pay.evidence.inspection_status}` : "-"],
+          ["Payload hash", el("span", { class: "mono", title: p.payload_hash }, p.payload_hash.slice(0, 16) + "…")],
+        ]),
+        el("p", { class: "note" }, "Approving signs this exact payload (by its hash). Any change needs a fresh approval."),
+        pending ? el("div", { class: "row" },
+          el("button", { class: "primary", onclick: () => decide(p, "approve") }, "Approve refund"),
+          el("button", { class: "danger", onclick: () => decide(p, "reject") }, "Reject")) : null,
+        state.actionMessage ? el("div", { class: state.actionMessage.ok ? "outcome ok" : "error" }, state.actionMessage.text) : null);
+    }
+
+    // ---------------------------------------------------------------- ticket
+
+    async function runAgent() {
+      try {
+        await api(`/staff/tickets/${state.ticketId}/agent-runs`, { method: "POST" });
+        state.actionMessage = null;
+      } catch (e) { state.runError = e.message; }
+      tick();
+    }
+
+    function renderTicket(t, latestRun) {
+      const busy = latestRun && ["queued", "running"].includes(latestRun.status);
+      mount("ticket",
+        el("div", { class: "row" }, el("h2", { style: "flex:1;margin:0" }, `Ticket ${t.id}`), badge(t.status)),
+        kv([["Customer", t.customer_id], ["Order", t.order_id || "none"], ["Category", t.category], ["Summary", t.summary]]),
+        el("h3", {}, "Customer wrote (untrusted text)"),
+        el("div", { class: "quote" }, t.customer_message),
+        el("h3", {}, "What the customer sees now"),
+        el("div", { class: "outcome" }, t.outcome ? t.outcome.message : "(no status message yet)"),
+        el("div", { class: "row", style: "margin-top:10px" },
+          el("button", { class: "primary", onclick: runAgent, disabled: busy || ["awaiting_approval", "awaiting_provider"].includes(t.status) },
+            busy ? `Agent ${latestRun.status}…` : "Run agent"),
+          latestRun?.job ? el("span", { class: "note" }, `job ${latestRun.job.status}, attempt ${latestRun.job.attempts}`) : null),
+        state.runError ? errorBox(state.runError) : null);
+    }
+
+    // ---------------------------------------------------------------- queue + demo panel
+
+    function select(ticketId) {
+      if (state.ticketId !== ticketId) { state.actionMessage = null; state.runError = null; }
+      state.ticketId = ticketId;
+      tick();
+    }
+
+    async function renderQueues() {
+      const status = document.getElementById("status-filter").value;
+      const [tickets, pending] = await Promise.all([
+        api(`/staff/tickets${status ? "?status=" + status : ""}`),
+        api("/staff/proposals?status=pending_approval"),
+      ]);
+      mount("queue", tickets.length ? tickets.map((t) => el("li", {
+        class: t.id === state.ticketId ? "active" : "", onclick: () => select(t.id),
+      }, el("div", { class: "row" }, el("b", {}, t.order_id || "no order"), badge(t.status)),
+         el("div", { class: "sub" }, t.customer_message.slice(0, 80))))
+        : el("li", { class: "muted" }, "No tickets."));
+      mount("approvals", pending.length ? pending.map((p) => el("li", {
+        class: p.payload.ticket_id === state.ticketId ? "active" : "", onclick: () => select(p.payload.ticket_id),
+      }, el("div", { class: "row" }, el("b", {}, rupees(p.payload.amount_minor)), el("span", {}, p.payload.order_id), badge(p.status)),
+         el("div", { class: "sub" }, `proposed by ${p.created_by}`)))
+        : el("li", { class: "muted" }, "Nothing waiting for approval."));
+    }
+
+    async function renderDemoPanel() {
+      const unsettled = await api("/staff/refunds");
+      const parked = await api("/staff/refunds?state=needs_review");
+      mount("unsettled", [...unsettled, ...parked].length ? [...unsettled, ...parked].map((r) => el("div", { class: "card" },
+        el("div", { class: "row" }, el("b", {}, rupees(r.amount_minor)), badge(r.status),
+           r.needs_review_reason ? el("span", { class: "badge bad" }, `needs review: ${r.needs_review_reason}`) : null),
+        el("div", { class: "note" }, `reconcile attempts ${r.reconcile_attempts}`,
+           r.next_reconcile_at ? `, next check ${time(r.next_reconcile_at)}` : ""),
+        el("button", { onclick: async () => {
+          try { await api(`/staff/refunds/${r.id}/refresh`, { method: "POST" }); } catch (e) { mount("demo-status", errorBox(e)); }
+          tick();
+        } }, "Ask provider now")))
+        : el("p", { class: "muted" }, "None. Every refund is settled."));
+    }
+
+    async function setupDemoPanel() {
+      try { await api("/dev/info", { auth: false }); } catch { return; }
+      document.getElementById("demo-panel").hidden = false;
+      const faults = [["timeout_after_apply", "Lose the provider's response (C)"],
+                      ["timeout_before_apply", "Time out before applying"], ["error_503", "Provider 503"]];
+      mount("faults", faults.map(([kind, label]) => el("button", { onclick: async () => {
+        try {
+          await api("/dev/faults", { method: "POST", body: { kind }, auth: false });
+          mount("demo-status", el("div", { class: "outcome warn" }, `Armed: ${label}. It hits the next refund call.`));
+        } catch (e) { mount("demo-status", errorBox(e)); }
+      } }, label)), el("button", { onclick: async () => {
+        await api("/dev/reset", { method: "POST", auth: false });
+        mount("demo-status", el("div", { class: "outcome" }, "Mock provider reset."));
+      } }, "Reset mocks"));
+    }
+
+    // ---------------------------------------------------------------- main loop
+
+    async function tick() {
+      await renderQueues();
+      if (!document.getElementById("demo-panel").hidden) await renderDemoPanel();
+      if (!state.ticketId) return;
+      const [ticket, runs] = await Promise.all([
+        api(`/staff/tickets/${state.ticketId}`), api(`/staff/tickets/${state.ticketId}/agent-runs`)]);
+      const latest = runs[0] || null;
+      renderTicket(ticket, latest);
+      renderEvidence(latest);
+      renderTimeline(latest ? await api(`/staff/agent-runs/${latest.id}/events`) : []);
+      const proposalId = latest?.outcome?.proposal_id;
+      renderProposal(proposalId ? await api(`/staff/proposals/${proposalId}`) : null);
+    }
+
+    (async () => {
+      const me = await startPage(["staff", "reviewer"]);
+      if (!me) return;
+      state.isReviewer = me.role === "reviewer";
+      document.getElementById("status-filter").addEventListener("change", tick);
+      await setupDemoPanel();
+      poll(tick, 1500);
+    })();
+  </script>
+</body>
+</html>
