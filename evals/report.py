@@ -14,6 +14,8 @@ from evals.grade import summarize
 ROOT = Path(__file__).resolve().parent
 RUNS_DIR, REPORTS_DIR = ROOT / "runs", ROOT / "reports"
 
+NOISE = 0.10  # smallest held-out accuracy gap treated as real (2 of 20 cases)
+
 DISCLAIMER = ("**Synthetic data only.** These cases are invented for this project and run against mock services. "
               "The numbers show how this design behaves on them; they are not production performance.")
 
@@ -102,8 +104,9 @@ def build(rows: list[dict]) -> tuple[str, dict]:
                          f"{_f(sp[split]['mean_tokens'])}).")
         dh = sp["heldout"]["route_acc"], s["heldout"]["route_acc"]
         if None not in dh:
-            verdict = ("specialists help on held-out cases" if dh[0] > dh[1] + 0.05 else
-                       "no clear held-out gain: keep the single agent (simpler, fewer prompts)" if dh[0] >= dh[1] - 0.05
+            # At n=20 held-out, one case is 5 points: only a gap of 10+ points (2+ cases) counts.
+            verdict = ("specialists help on held-out cases" if dh[0] >= dh[1] + NOISE else
+                       "no clear held-out gain: keep the single agent (simpler, fewer prompts)" if dh[0] > dh[1] - NOISE
                        else "specialists are worse on held-out cases")
             lines.append(f"- **Verdict for {model}:** {verdict}.")
     if not compared:
