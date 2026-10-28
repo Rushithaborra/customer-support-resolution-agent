@@ -9,7 +9,7 @@ from app.agent.runner import start_run
 from app.db.models import ActionProposal, Job, Ticket, WorkflowRun
 from app.db.session import SessionLocal
 from app.jobs import queue
-from app.jobs.worker import schedule_sweep
+from app.jobs.worker import schedule
 from app.llm.fake import ScriptedLLM
 from app.llm.types import LLMConfigError
 from tests.agent_scripts import draft, open_ticket, refund_script
@@ -93,9 +93,10 @@ def test_same_dedupe_key_gives_one_job(db):
 
 def test_sweep_is_scheduled_once_per_bucket(db):
     t = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)  # a 5-minute bucket boundary
-    first = schedule_sweep(db, t)
-    assert schedule_sweep(db, t + timedelta(minutes=4)).id == first.id  # second worker, same bucket
-    assert schedule_sweep(db, t + timedelta(minutes=5)).id != first.id  # next bucket
+    first = schedule(db, "expire_sweep", t)
+    assert schedule(db, "expire_sweep", t + timedelta(minutes=4)).id == first.id  # second worker, same bucket
+    assert schedule(db, "expire_sweep", t + timedelta(minutes=5)).id != first.id  # next bucket
+    assert schedule(db, "reconcile_sweep", t).id != first.id  # each kind has its own slots
 
 
 def test_sweep_job_expires_and_finishes_paused_runs(agent, client, db, work):
